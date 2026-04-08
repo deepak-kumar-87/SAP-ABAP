@@ -1,0 +1,172 @@
+REPORT ZOO_PO_MT.
+tables: mara.
+*---------------------------------------------------------------------*
+* TYPES
+*---------------------------------------------------------------------*
+TYPES: BEGIN OF ty_mara,
+         matnr TYPE mara-matnr,
+         mtart TYPE mara-mtart,
+         meins TYPE mara-meins,
+       END OF ty_mara.
+
+TYPES: BEGIN OF ty_ekpo,
+         ebeln TYPE ekpo-ebeln,
+         ebelp TYPE ekpo-ebelp,
+         matnr TYPE ekpo-matnr,
+         txz01 TYPE ekpo-txz01,
+         werks TYPE ekpo-werks,
+         menge TYPE ekpo-menge,
+         netpr TYPE ekpo-netpr,
+         netwr TYPE ekpo-netwr,
+       END OF ty_ekpo.
+
+TYPES: BEGIN OF ty_ekko,
+         ebeln TYPE ekko-ebeln,
+         bukrs TYPE ekko-bukrs,
+       END OF ty_ekko.
+
+TYPES: BEGIN OF ty_final,
+         matnr TYPE mara-matnr,
+         mtart TYPE mara-mtart,
+         meins TYPE mara-meins,
+         ebeln TYPE ekpo-ebeln,
+         txz01 TYPE ekpo-txz01,
+         bukrs TYPE ekko-bukrs,
+         werks TYPE ekpo-werks,
+         menge TYPE ekpo-menge,
+         netpr TYPE ekpo-netpr,
+         netwr TYPE ekpo-netwr,
+       END OF ty_final.
+
+*---------------------------------------------------------------------*
+* SELECTION
+*---------------------------------------------------------------------*
+SELECT-OPTIONS: s_matnr FOR mara-matnr.
+
+*---------------------------------------------------------------------*
+* CLASS
+*---------------------------------------------------------------------*
+CLASS lcl_report DEFINITION.
+  PUBLIC SECTION.
+    METHODS: run.
+
+  PRIVATE SECTION.
+    DATA:
+      gt_mara  TYPE STANDARD TABLE OF ty_mara,
+      gt_ekpo  TYPE STANDARD TABLE OF ty_ekpo,
+      gt_ekko  TYPE STANDARD TABLE OF ty_ekko,
+      gt_final TYPE STANDARD TABLE OF ty_final.
+
+    METHODS:
+      get_data,
+      process_data,
+      display_alv.
+ENDCLASS.
+
+*---------------------------------------------------------------------*
+* IMPLEMENTATION
+*---------------------------------------------------------------------*
+CLASS lcl_report IMPLEMENTATION.
+
+  METHOD run.
+    get_data( ).
+    process_data( ).
+    display_alv( ).
+  ENDMETHOD.
+
+*---------------------------------------------------------------------*
+* GET DATA (Multiple Internal Tables)
+*---------------------------------------------------------------------*
+  METHOD get_data.
+
+    " MARA
+    SELECT matnr, mtart, meins
+      FROM mara
+      INTO TABLE @gt_mara
+      WHERE matnr IN @s_matnr.
+
+    IF gt_mara IS NOT INITIAL.
+
+      " EKPO (FOR ALL ENTRIES)
+      SELECT ebeln, ebelp, matnr, txz01, werks, menge, netpr, netwr
+        FROM ekpo
+        INTO TABLE @gt_ekpo
+        FOR ALL ENTRIES IN @gt_mara
+        WHERE matnr = @gt_mara-matnr.
+
+      IF gt_ekpo IS NOT INITIAL.
+
+        " EKKO
+        SELECT ebeln, bukrs
+          FROM ekko
+          INTO TABLE @gt_ekko
+          FOR ALL ENTRIES IN @gt_ekpo
+          WHERE ebeln = @gt_ekpo-ebeln.
+
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+*---------------------------------------------------------------------*
+* PROCESS DATA (Merge into Final ITAB)
+*---------------------------------------------------------------------*
+  METHOD process_data.
+
+    LOOP AT gt_ekpo INTO DATA(ls_ekpo).
+
+      DATA(ls_final) = VALUE ty_final( ).
+
+      " EKPO data
+      ls_final = CORRESPONDING #( ls_ekpo ).
+
+      " MARA lookup
+      READ TABLE gt_mara INTO DATA(ls_mara)
+        WITH KEY matnr = ls_ekpo-matnr.
+      IF sy-subrc = 0.
+        ls_final = CORRESPONDING #( BASE ( ls_final ) ls_mara ).
+      ENDIF.
+
+      " EKKO lookup
+      READ TABLE gt_ekko INTO DATA(ls_ekko)
+        WITH KEY ebeln = ls_ekpo-ebeln.
+      IF sy-subrc = 0.
+        ls_final = CORRESPONDING #( BASE ( ls_final ) ls_ekko ).
+      ENDIF.
+
+      APPEND ls_final TO gt_final.
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+*---------------------------------------------------------------------*
+* DISPLAY ALV
+*---------------------------------------------------------------------*
+  METHOD display_alv.
+
+    TRY.
+        cl_salv_table=>factory(
+          IMPORTING r_salv_table = DATA(lo_alv)
+          CHANGING  t_table      = gt_final ).
+
+        lo_alv->get_functions( )->set_all( abap_true ).
+        lo_alv->get_columns( )->set_optimize( abap_true ).
+
+        lo_alv->get_display_settings( )->set_list_header( 'Multi Table ALV Report' ).
+
+        lo_alv->display( ).
+
+      CATCH cx_salv_msg INTO DATA(lx).
+        MESSAGE lx->get_text( ) TYPE 'E'.
+    ENDTRY.
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+*---------------------------------------------------------------------*
+* START
+*---------------------------------------------------------------------*
+START-OF-SELECTION.
+  NEW lcl_report( )->run( ).
