@@ -119,7 +119,7 @@ CLASS CL_ALV IMPLEMENTATION.      " Local class implementation
           CATCH CX_SALV_NOT_FOUND.
         ENDTRY.
 
-        lo_alv->GET_DISPLAY_SETTINGS( )->SET_LIST_HEADER( 'OOPS ALV Report' ).
+        lo_alv->GET_DISPLAY_SETTINGS( )->SET_LIST_HEADER( 'OOPS ALV Report' ).  " Title custome text header
 
         LO_ALV->DISPLAY( ).
 
