@@ -1,1 +1,142 @@
+*&---------------------------------------------------------------------*
+*& Report ZOO_ALL_F_ALV
+*&---------------------------------------------------------------------*
+REPORT ZOO_ALL_F_ALV.
 
+TABLES: ZDEL_STATUS, ZDEL_MAT.
+
+TYPES: BEGIN OF TY_FINAL,                         " Final Strature
+         DELIVERYNO TYPE ZDELIVERYNO,
+         PLANT      TYPE ZPLANT,
+         STATUSTIME TYPE ZSTATUSTIME,
+         LOCATION   TYPE ZLOCATION1,
+         STATUS     TYPE ZSTATUS,
+         ITEM       TYPE ZITEM,
+         MATERIAL   TYPE ZMATERIAL1,
+       END OF TY_FINAL.
+
+SELECTION-SCREEN BEGIN OF BLOCK B1 WITH FRAME TITLE TEXT-001.       " User Input Screen
+SELECT-OPTIONS: S_DELNO FOR ZDEL_STATUS-DELIVERYNO.
+SELECTION-SCREEN END OF BLOCK B1.
+
+CLASS CL_ALV DEFINITION.      " Local class definition
+
+  PUBLIC SECTION.
+
+    METHODS:
+      GET_DATA,
+      PROCESS_DATA,
+      DISPLAY_DATA.
+
+  PRIVATE SECTION.
+
+    DATA:
+      LT_STATUS TYPE TABLE OF ZDEL_STATUS,
+      LT_MAT    TYPE TABLE OF ZDEL_MAT,
+      LT_FINAL  TYPE TABLE OF TY_FINAL.
+
+    DATA: LO_SETTING  TYPE REF TO CL_SALV_DISPLAY_SETTINGS, " Zebra enable
+          LO_FUNTIONS TYPE REF TO CL_SALV_FUNCTIONS_LIST,   " All icon enable
+          LO_COLUMNS  TYPE REF TO CL_SALV_COLUMNS_TABLE,    " All field catalog size adjust
+          LO_COL      TYPE REF TO CL_SALV_COLUMN.           " Change custome field catalog text name
+ENDCLASS.
+
+CLASS CL_ALV IMPLEMENTATION.      " Local class implementation
+
+*---------------------------------------------------------------------*
+* Get Data
+*---------------------------------------------------------------------*
+  METHOD GET_DATA.
+
+    SELECT *
+      FROM ZDEL_STATUS
+      WHERE DELIVERYNO IN @S_DELNO
+      INTO TABLE @LT_STATUS.
+
+    IF LT_STATUS IS INITIAL.
+      MESSAGE 'No status data found' TYPE 'I'.
+      RETURN.
+    ENDIF.
+
+    SELECT *
+      FROM ZDEL_MAT
+      FOR ALL ENTRIES IN @LT_STATUS
+      WHERE DELIVERYNO = @LT_STATUS-DELIVERYNO
+      INTO TABLE @LT_MAT.
+
+  ENDMETHOD.
+
+*---------------------------------------------------------------------*
+* Process Data
+*---------------------------------------------------------------------*
+  METHOD PROCESS_DATA.
+
+    LOOP AT LT_STATUS ASSIGNING FIELD-SYMBOL(<FS_STATUS>).
+      DATA(LS_FINAL) = VALUE TY_FINAL(
+                                DELIVERYNO = <FS_STATUS>-DELIVERYNO
+                                PLANT = <FS_STATUS>-PLANT
+                                STATUSTIME = <FS_STATUS>-STATUSTIME
+                                LOCATION = <FS_STATUS>-LOCATION
+                                STATUS = <FS_STATUS>-STATUS
+                               ).
+
+      LOOP AT LT_MAT ASSIGNING FIELD-SYMBOL(<FS_MAT>) WHERE DELIVERYNO = <FS_STATUS>-DELIVERYNO.
+        DATA(LS_MAT) = LS_FINAL.
+        LS_MAT-ITEM = <FS_MAT>-ITEM.
+        LS_MAT-MATERIAL = <FS_MAT>-MATERIAL.
+        APPEND LS_MAT TO LT_FINAL.
+      ENDLOOP.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+*---------------------------------------------------------------------*
+* Display ALV
+*---------------------------------------------------------------------*
+  METHOD DISPLAY_DATA.
+    TRY.
+        CL_SALV_TABLE=>FACTORY(
+          IMPORTING
+            R_SALV_TABLE = DATA(LO_ALV)
+          CHANGING
+            T_TABLE      = LT_FINAL ).
+
+        LO_SETTING = LO_ALV->GET_DISPLAY_SETTINGS( ).         " Zebra Enable
+        LO_SETTING->SET_STRIPED_PATTERN( ABAP_TRUE ).
+
+
+        LO_FUNTIONS = LO_ALV->GET_FUNCTIONS( ).               " Top all icon enable
+        LO_FUNTIONS->SET_ALL( ABAP_TRUE ).
+
+        LO_COLUMNS = LO_ALV->GET_COLUMNS( ).                  " Field Catalog Adjust
+        LO_COLUMNS->SET_OPTIMIZE( 'X' ).
+
+        TRY.
+            LO_COL = LO_COLUMNS->GET_COLUMN( 'MATERIAL' ).    " set Text field catalog
+            LO_COL->SET_SHORT_TEXT( 'Mat.No' ).
+            LO_COL->SET_MEDIUM_TEXT( 'Material' ).
+            LO_COL->SET_LONG_TEXT( 'Material Number' ).
+          CATCH CX_SALV_NOT_FOUND.
+        ENDTRY.
+
+        lo_alv->GET_DISPLAY_SETTINGS( )->SET_LIST_HEADER( 'OOPS ALV Report' ).
+
+        LO_ALV->DISPLAY( ).
+
+      CATCH CX_SALV_MSG INTO DATA(LX_ERROR).
+        MESSAGE LX_ERROR->GET_TEXT( ) TYPE 'E'.
+
+    ENDTRY.
+  ENDMETHOD.
+ENDCLASS.
+
+*---------------------------------------------------------------------*
+* Start of Selection
+*---------------------------------------------------------------------*
+START-OF-SELECTION.
+
+  DATA(LO_OBJ) = NEW CL_ALV( ).   " Create Object
+
+  LO_OBJ->GET_DATA( ).            " Call Method one by one
+  LO_OBJ->PROCESS_DATA( ).
+  LO_OBJ->DISPLAY_DATA( ).
