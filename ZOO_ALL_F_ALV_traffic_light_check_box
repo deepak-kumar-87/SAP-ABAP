@@ -1,1 +1,208 @@
+*&---------------------------------------------------------------------*
+*& Report ZOO_ALL_F_ALV
+*&---------------------------------------------------------------------*
+REPORT ZOO_ALL_F_ALV.
+TYPE-POOLS: SLIS, ICON.
+TABLES: ZDEL_STATUS, ZDEL_MAT.
 
+TYPES: BEGIN OF TY_FINAL,
+         DELIVERYNO TYPE ZDELIVERYNO,
+         PLANT      TYPE ZPLANT,
+         STATUSTIME TYPE ZSTATUSTIME,
+         LOCATION   TYPE ZLOCATION1,
+         STATUS     TYPE ZSTATUS,
+         ITEM       TYPE ZITEM,
+         MATERIAL   TYPE ZMATERIAL1,
+         LIGHT      TYPE C,
+         CHECK      TYPE XFELD,
+       END OF TY_FINAL.
+
+SELECTION-SCREEN BEGIN OF BLOCK B1 WITH FRAME TITLE TEXT-001.
+SELECT-OPTIONS: S_DELNO FOR ZDEL_STATUS-DELIVERYNO.
+SELECTION-SCREEN END OF BLOCK B1.
+
+*---------------------------------------------------------------------*
+* Event Handler Class  <-- NEW
+*---------------------------------------------------------------------*
+CLASS CL_EVENT_HANDLER DEFINITION.
+  PUBLIC SECTION.
+    CLASS-METHODS:
+      ON_LINK_CLICK
+        FOR EVENT LINK_CLICK OF CL_SALV_EVENTS_TABLE
+        IMPORTING ROW COLUMN.
+ENDCLASS.
+
+CLASS CL_ALV DEFINITION.
+  PUBLIC SECTION.
+    METHODS:
+      GET_DATA,
+      PROCESS_DATA,
+      DISPLAY_DATA.
+
+    " ↓ Moved here from PRIVATE SECTION
+    CLASS-DATA:
+      LT_FINAL TYPE TABLE OF TY_FINAL,
+      LO_ALV   TYPE REF TO CL_SALV_TABLE.
+
+  PRIVATE SECTION.
+    DATA:
+      LT_STATUS TYPE TABLE OF ZDEL_STATUS,
+      LT_MAT    TYPE TABLE OF ZDEL_MAT.
+
+    DATA: LO_SETTING   TYPE REF TO CL_SALV_DISPLAY_SETTINGS,
+          LO_FUNTIONS  TYPE REF TO CL_SALV_FUNCTIONS_LIST,
+          LO_COLUMNS   TYPE REF TO CL_SALV_COLUMNS_TABLE,
+          LO_COL       TYPE REF TO CL_SALV_COLUMN,
+          LO_COLUMN    TYPE REF TO CL_SALV_COLUMN_LIST,
+          LO_COLUMNSS  TYPE REF TO CL_SALV_COLUMNS.
+ENDCLASS.
+
+*---------------------------------------------------------------------*
+* Event Handler Implementation  <-- NEW
+*---------------------------------------------------------------------*
+CLASS CL_EVENT_HANDLER IMPLEMENTATION.
+  METHOD ON_LINK_CLICK.
+
+    " Only react to clicks on the CHECK column
+    CHECK COLUMN = 'CHECK'.
+
+    " Read the clicked row from the shared internal table
+    READ TABLE CL_ALV=>LT_FINAL ASSIGNING FIELD-SYMBOL(<FS_ROW>) INDEX ROW.
+
+    IF SY-SUBRC = 0.
+      " Toggle the checkbox value
+      IF <FS_ROW>-CHECK = ABAP_TRUE.
+        <FS_ROW>-CHECK = ABAP_FALSE.
+      ELSE.
+        <FS_ROW>-CHECK = ABAP_TRUE.
+      ENDIF.
+    ENDIF.
+
+    " Refresh the ALV display to reflect the change
+    CL_ALV=>LO_ALV->REFRESH( ).
+
+  ENDMETHOD.
+ENDCLASS.
+
+CLASS CL_ALV IMPLEMENTATION.
+
+*---------------------------------------------------------------------*
+* Get Data
+*---------------------------------------------------------------------*
+  METHOD GET_DATA.
+    SELECT *
+      FROM ZDEL_STATUS
+      WHERE DELIVERYNO IN @S_DELNO
+      INTO TABLE @LT_STATUS.
+
+    IF LT_STATUS IS INITIAL.
+      MESSAGE 'No status data found' TYPE 'I'.
+      RETURN.
+    ENDIF.
+
+    SELECT *
+      FROM ZDEL_MAT
+      FOR ALL ENTRIES IN @LT_STATUS
+      WHERE DELIVERYNO = @LT_STATUS-DELIVERYNO
+      INTO TABLE @LT_MAT.
+  ENDMETHOD.
+
+*---------------------------------------------------------------------*
+* Process Data
+*---------------------------------------------------------------------*
+  METHOD PROCESS_DATA.
+    LOOP AT LT_STATUS ASSIGNING FIELD-SYMBOL(<FS_STATUS>).
+      DATA(LS_FINAL) = VALUE TY_FINAL(
+                              DELIVERYNO = <FS_STATUS>-DELIVERYNO
+                              PLANT      = <FS_STATUS>-PLANT
+                              STATUSTIME = <FS_STATUS>-STATUSTIME
+                              LOCATION   = <FS_STATUS>-LOCATION
+                              STATUS     = <FS_STATUS>-STATUS ).
+
+      LOOP AT LT_MAT ASSIGNING FIELD-SYMBOL(<FS_MAT>)
+                     WHERE DELIVERYNO = <FS_STATUS>-DELIVERYNO.
+        DATA(LS_MAT) = LS_FINAL.
+        LS_MAT-ITEM     = <FS_MAT>-ITEM.
+        LS_MAT-MATERIAL = <FS_MAT>-MATERIAL.
+        APPEND LS_MAT TO LT_FINAL.
+      ENDLOOP.
+    ENDLOOP.
+
+    LOOP AT LT_FINAL ASSIGNING FIELD-SYMBOL(<FS_LIGHT>).
+      IF <FS_LIGHT>-STATUS = 'ON'.
+        <FS_LIGHT>-LIGHT = '3'.
+      ELSEIF <FS_LIGHT>-STATUS = 'OFF'.
+        <FS_LIGHT>-LIGHT = '1'.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+*---------------------------------------------------------------------*
+* Display ALV
+*---------------------------------------------------------------------*
+  METHOD DISPLAY_DATA.
+    TRY.
+        CL_SALV_TABLE=>FACTORY(
+          IMPORTING
+            R_SALV_TABLE = LO_ALV          " <-- Store in CLASS-DATA ref
+          CHANGING
+            T_TABLE      = LT_FINAL ).
+
+        " --- Zebra ---
+        LO_SETTING = LO_ALV->GET_DISPLAY_SETTINGS( ).
+        LO_SETTING->SET_STRIPED_PATTERN( ABAP_TRUE ).
+
+        " --- Toolbar icons ---
+        LO_FUNTIONS = LO_ALV->GET_FUNCTIONS( ).
+        LO_FUNTIONS->SET_ALL( ABAP_TRUE ).
+
+        " --- Column optimization ---
+        LO_COLUMNS = LO_ALV->GET_COLUMNS( ).
+        LO_COLUMNS->SET_OPTIMIZE( 'X' ).
+
+        " --- Material column texts ---
+        TRY.
+            LO_COL = LO_COLUMNS->GET_COLUMN( 'MATERIAL' ).
+            LO_COL->SET_SHORT_TEXT( 'Mat.No' ).
+            LO_COL->SET_MEDIUM_TEXT( 'Material' ).
+            LO_COL->SET_LONG_TEXT( 'Material Number' ).
+          CATCH CX_SALV_NOT_FOUND.
+        ENDTRY.
+
+        " --- Title ---
+        LO_ALV->GET_DISPLAY_SETTINGS( )->SET_LIST_HEADER( 'OOPS ALV Report' ).
+
+        " --- Traffic light ---
+        LO_ALV->GET_COLUMNS( )->SET_EXCEPTION_COLUMN( VALUE = 'LIGHT' ).
+
+        " --- Checkbox column setup ---
+        TRY.
+            LO_COLUMN ?= LO_COLUMNS->GET_COLUMN( 'CHECK' ).
+            LO_COLUMN->SET_CELL_TYPE( IF_SALV_C_CELL_TYPE=>CHECKBOX_HOTSPOT ).
+            LO_COLUMN->SET_SHORT_TEXT( 'Select' ).
+            LO_COLUMN->SET_MEDIUM_TEXT( 'Select' ).
+            LO_COLUMN->SET_LONG_TEXT( 'Select Row' ).
+            LO_COLUMN->SET_OUTPUT_LENGTH( 10 ).
+          CATCH CX_SALV_NOT_FOUND.
+        ENDTRY.
+
+        " --- Register LINK_CLICK event handler  <-- KEY FIX ---
+        DATA(LO_EVENTS) = LO_ALV->GET_EVENT( ).
+        SET HANDLER CL_EVENT_HANDLER=>ON_LINK_CLICK FOR LO_EVENTS.
+
+        LO_ALV->DISPLAY( ).
+
+      CATCH CX_SALV_MSG INTO DATA(LX_ERROR).
+        MESSAGE LX_ERROR->GET_TEXT( ) TYPE 'E'.
+    ENDTRY.
+  ENDMETHOD.
+ENDCLASS.
+
+*---------------------------------------------------------------------*
+* Start of Selection
+*---------------------------------------------------------------------*
+START-OF-SELECTION.
+  DATA(LO_OBJ) = NEW CL_ALV( ).
+  LO_OBJ->GET_DATA( ).
+  LO_OBJ->PROCESS_DATA( ).
+  LO_OBJ->DISPLAY_DATA( ).
