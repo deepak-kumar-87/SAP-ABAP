@@ -1,1 +1,49 @@
+*&---------------------------------------------------------------------*
+*& Report ZOO_SO
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT ZOO_SO.
+DATA: PERDAT TYPE ERDAT,
+      PERZET TYPE ERZET,
+      PZUONR TYPE ORDNR_V,
+      PNETWR TYPE NETWR_AK.
+PARAMETERS: PVBELN TYPE VBELN.
 
+CLASS CL_SO DEFINITION.
+  PUBLIC SECTION.
+    METHODS: DISPLAY IMPORTING  PVBELN TYPE VBELN_VA
+                     EXPORTING  PERDAT TYPE ERDAT
+                                PERZET TYPE ERZET
+                                PZUONR TYPE ORDNR_V
+                                PNETWR TYPE NETWR_AK
+                     EXCEPTIONS WRONG_INPUT.
+ENDCLASS.
+
+CLASS CL_SO IMPLEMENTATION.
+  METHOD DISPLAY.
+    SELECT SINGLE ERDAT ERZET ZUONR NETWR
+      FROM VBAK INTO ( PERDAT, PERZET, PZUONR, PNETWR )
+      WHERE VBELN = PVBELN.
+
+    IF SY-SUBRC <> 0.
+      RAISE WRONG_INPUT.
+    ENDIF.
+  ENDMETHOD.
+ENDCLASS.
+
+START-OF-SELECTION.
+  DATA(LO_OBJ) = NEW CL_SO( ).
+
+  LO_OBJ->DISPLAY(  EXPORTING PVBELN  = PVBELN
+                    IMPORTING  PERDAT = PERDAT
+                               PERZET = PERZET
+                               PZUONR = PZUONR
+                               PNETWR = PNETWR
+                    EXCEPTIONS WRONG_INPUT = 1
+                  ).
+  IF sy-SUBRC <> 0.
+    MESSAGE E000(ZMESSAGE).
+    else.
+      WRITE: / PERDAT, PERZET, PZUONR, PNETWR.
+  ENDIF.
