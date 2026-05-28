@@ -1,1 +1,48 @@
+*&---------------------------------------------------------------------*
+*& Report ZOO_FINAL_SUPPER_CL
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT ZOO_FINAL_SUPPER_CL.
+DATA: PERDAT TYPE	ERDAT,
+      PERZET TYPE	ERZET,
+      PERNAM TYPE	ERNAM.
 
+PARAMETERS: PVBELN TYPE VBELN.
+
+CLASS CL_SO DEFINITION. "FINAL
+  PUBLIC SECTION.
+    METHODS DISPLAY IMPORTING PVBELN TYPE VBELN
+                    EXPORTING PERDAT TYPE	ERDAT
+                              PERZET TYPE	ERZET
+                              PERNAM TYPE	ERNAM.
+ENDCLASS.
+
+CLASS CL_SO IMPLEMENTATION.
+  METHOD DISPLAY.
+    SELECT SINGLE ERDAT ERZET ERNAM FROM VBAK
+      INTO  ( PERDAT, PERZET,  PERNAM )
+      WHERE VBELN = PVBELN.
+    IF SY-SUBRC <> 0.
+      MESSAGE E000(ZMESSAGE).
+    ENDIF.
+  ENDMETHOD.
+ENDCLASS.
+
+CLASS CL_SO_ITEM DEFINITION INHERITING FROM CL_SO.
+
+ENDCLASS.
+
+CLASS CL_SO_ITEM IMPLEMENTATION.
+
+ENDCLASS.
+
+START-OF-SELECTION.
+  DATA(LO_OBJ) = NEW CL_SO_ITEM( ).
+  LO_OBJ->DISPLAY(  EXPORTING PVBELN = PVBELN
+                    IMPORTING PERDAT = PERDAT
+                              PERZET = PERZET
+                              PERNAM = PERNAM
+                  ).
+
+  WRITE :/ PERDAT, PERZET, PERNAM.
