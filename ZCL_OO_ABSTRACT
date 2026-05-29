@@ -1,0 +1,81 @@
+*&---------------------------------------------------------------------*
+*& Report ZCL_OO_ABSTRACT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT ZCL_OO_ABSTRACT.
+data: PERDAT TYPE ERDAT,
+      PERZET TYPE ERZET,
+      PERNAM TYPE ERNAM.
+PARAMETERS: PVBELN TYPE VBELN.
+PARAMETERS:         P_BUTON1 TYPE C RADIOBUTTON GROUP R1.
+PARAMETERS       P_BUTON2 TYPE C RADIOBUTTON GROUP R1.
+
+CLASS CL_ABSTRACT DEFINITION ABSTRACT.
+  PUBLIC SECTION.
+    METHODS DISPLAY ABSTRACT IMPORTING PVBELN TYPE VBELN
+                             EXPORTING PERDAT TYPE ERDAT
+                                       PERZET TYPE ERZET
+                                       PERNAM TYPE ERNAM.
+ENDCLASS.
+
+CLASS SALE_ABSTRACT DEFINITION INHERITING FROM CL_ABSTRACT.
+  PUBLIC SECTION.
+    METHODS DISPLAY REDEFINITION.
+ENDCLASS.
+CLASS SALE_ABSTRACT IMPLEMENTATION.
+  METHOD DISPLAY.
+    SELECT SINGLE ERDAT ERZET ERNAM FROM VBAK
+      INTO ( PERDAT, PERZET, PERNAM )
+      WHERE VBELN = PVBELN.
+
+    IF SY-SUBRC <> 0.
+      MESSAGE E000(ZMESSAGE).
+    ENDIF.
+  ENDMETHOD.
+
+ENDCLASS.
+
+CLASS BILLING_ABSTRACT DEFINITION INHERITING FROM CL_ABSTRACT.
+  PUBLIC SECTION.
+    METHODS DISPLAY REDEFINITION.
+ENDCLASS.
+CLASS BILLING_ABSTRACT IMPLEMENTATION.
+  METHOD DISPLAY.
+    SELECT SINGLE ERDAT ERZET ERNAM FROM VBAK
+      INTO ( PERDAT, PERZET, PERNAM )
+      WHERE VBELN = PVBELN.
+
+    IF SY-SUBRC <> 0.
+      MESSAGE E000(ZMESSAGE).
+    ENDIF.
+  ENDMETHOD.
+ENDCLASS.
+
+START-OF-SELECTION.
+data: lo_obj1 TYPE REF TO SALE_ABSTRACT,
+      lo_obj2 TYPE REF TO BILLING_ABSTRACT.
+
+IF P_BUTON1 = 'X'.
+  CREATE OBJECT lo_obj1.
+  lo_obj1->DISPLAY( EXPORTING pvbeln = pvbeln
+                    IMPORTING PERDAT = PERDAT
+                              PERZET = PERZET
+                              PERNAM = PERNAM
+                     ).
+
+  WRITE :/ 'Sales order document'.
+  WRITE :/ PERDAT, PERZET, PERNAM.
+ENDIF.
+
+IF P_BUTON2 = 'X'.
+  CREATE OBJECT lo_obj2.
+  lo_obj2->DISPLAY( EXPORTING pvbeln = pvbeln
+                    IMPORTING PERDAT = PERDAT
+                              PERZET = PERZET
+                              PERNAM = PERNAM
+                     ).
+
+  WRITE :/ 'Billing order document'.
+  WRITE :/ PERDAT, PERZET, PERNAM.
+ENDIF.
