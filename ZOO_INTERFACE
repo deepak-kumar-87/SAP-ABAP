@@ -1,0 +1,70 @@
+*&---------------------------------------------------------------------*
+*& Report ZOO_INTERFACE
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT ZOO_INTERFACE.
+
+DATA: LV_ERDAT TYPE ERDAT,
+      LV_ERZET TYPE ERZET,
+      LV_ERNAM TYPE ERDAT,
+      LV_VBTYP TYPE VBTYPL.
+
+PARAMETERS: PVBELN TYPE VBELN_VA,
+            P_R1   TYPE C RADIOBUTTON GROUP R1,     " Sales
+            P_R2   TYPE C RADIOBUTTON GROUP R1.     " Billing
+
+INTERFACE INTERFACE1.
+  METHODS SALES IMPORTING PVBELN TYPE VBELN_VA
+                EXPORTING PERDAT TYPE ERDAT
+                          PERZET TYPE ERZET
+                          PERNAM TYPE ERDAT
+                          PVBTYP TYPE VBTYPL.
+ENDINTERFACE.
+INTERFACE INTERFACE2.
+  METHODS BILLING IMPORTING PVBELN TYPE VBELN_VA
+                  EXPORTING PERDAT TYPE ERDAT
+                            PERZET TYPE ERZET
+                            PERNAM TYPE ERDAT
+                            PVBTYP TYPE VBTYPL.
+ENDINTERFACE.
+
+CLASS CL_SALES DEFINITION.
+  PUBLIC SECTION.
+    INTERFACES: INTERFACE1, INTERFACE2.
+ENDCLASS.
+CLASS CL_SALES IMPLEMENTATION.
+  METHOD INTERFACE1~SALES.
+    SELECT SINGLE ERDAT ERDAT ERDAT VBTYP FROM VBAK INTO ( PERDAT, PERDAT, PERNAM, PVBTYP ) WHERE VBELN = PVBELN.
+  ENDMETHOD.
+  METHOD INTERFACE2~BILLING.
+    SELECT SINGLE ERDAT ERDAT ERDAT VBTYP FROM VBRK INTO ( PERDAT, PERDAT, PERNAM, PVBTYP ) WHERE VBELN = PVBELN.
+  ENDMETHOD.
+ENDCLASS.
+
+
+
+START-OF-SELECTION.
+DATA(LO_SALES) = NEW CL_SALES( ).
+  IF P_R1 = 'X'.
+
+    LO_SALES->INTERFACE1~sales( EXPORTING PVBELN = PVBELN
+                                  IMPORTING PERDAT = LV_ERDAT
+                                            PERZET = LV_ERZET
+                                            PERNAM = LV_ERNAM
+                                            PVBTYP = LV_VBTYP ).
+    WRITE /: 'Sales oreder Document'.
+    WRITE /: LV_ERDAT, LV_ERZET, LV_ERNAM, LV_ERNAM.
+
+  ENDIF.
+
+  IF P_R2 = 'X'.
+    LO_SALES->INTERFACE2~billing( EXPORTING PVBELN = PVBELN
+                                  IMPORTING PERDAT = LV_ERDAT
+                                            PERZET = LV_ERZET
+                                            PERNAM = LV_ERNAM
+                                            PVBTYP = LV_VBTYP ).
+    WRITE /: 'Billing oreder Document'.
+    WRITE /: LV_ERDAT, LV_ERZET, LV_ERNAM, LV_ERNAM.
+
+  ENDIF.
