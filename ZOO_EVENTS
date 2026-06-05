@@ -1,0 +1,60 @@
+*&---------------------------------------------------------------------*
+*& Report ZOO_EVENTS
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT ZOO_EVENTS.
+
+data: lverdat TYPE erdat,
+      lverzet TYPE erzet,
+      lvernam TYPE ernam.
+
+PARAMETERS: PVBELN TYPE VBELN_VA.
+
+CLASS SALES DEFINITION.
+  PUBLIC SECTION.
+    METHODS DISPLAY IMPORTING PVBELN TYPE VBELN_VA
+                    EXPORTING PERDAT TYPE ERDAT
+                              PERZET TYPE ERZET
+                              PERNAM TYPE ERNAM.
+    EVENTS WRONG_INPUT.
+ENDCLASS.
+
+
+CLASS SALES IMPLEMENTATION.
+  METHOD DISPLAY.
+    IF PVBELN IS INITIAL.
+      RAISE EVENT WRONG_INPUT.
+    ELSE.
+      SELECT SINGLE ERDAT ERZET ERNAM FROM VBAK INTO ( PERDAT, PERZET, PERNAM ) WHERE VBELN = PVBELN.
+    ENDIF.
+  ENDMETHOD.
+ENDCLASS.
+
+CLASS msg DEFINITION.
+  PUBLIC SECTION.
+  METHODS message FOR EVENT WRONG_INPUT of sales.     " Event Hander Method
+  ENDCLASS.
+
+  CLASS msg IMPLEMENTATION.
+    METHOD message.
+        WRITE 'Please Enter sales order Number'.
+      ENDMETHOD.
+
+    ENDCLASS.
+START-OF-SELECTION.
+
+data(lo_obj1) = new sales( ).
+data(lo_obj2) = new msg( ).
+
+set HANDLER lo_obj2->message FOR LO_OBJ1.     "Registering the event Handler Method.
+
+lo_obj1->DISPLAY( EXPORTING pvbeln = pvbeln
+                 IMPORTING perdat = lverdat
+                           perzet = lverzet
+                           pernam = lvernam   ).
+
+IF lverdat is NOT INITIAL and lverzet is NOT INITIAL and lvernam is NOT INITIAL.
+  WRITE /: lverdat, lverzet, lvernam.
+
+ENDIF.
