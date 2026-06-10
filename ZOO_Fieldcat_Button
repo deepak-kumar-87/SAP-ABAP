@@ -1,0 +1,173 @@
+*&---------------------------------------------------------------------*
+*& Report ZOO_CL_CONTAINER
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT ZOO_CL_CONTAINER.
+
+TABLES: VBAK, VBAP.
+
+TYPES: BEGIN OF TY_VBAK,
+         VBELN TYPE VBELN_VA,
+         ERDAT TYPE  ERDAT,
+         ERZET TYPE  ERZET,
+         ERNAM TYPE  ERNAM,
+       END OF TY_VBAK.
+
+TYPES: BEGIN OF TY_VBAP,
+         VBELN TYPE  VBELN_VA,
+         POSNR TYPE  POSNR_VA,
+         MATNR TYPE  MATNR,
+         ARKTX TYPE ARKTX,
+       END OF TY_VBAP.
+
+TYPES: BEGIN OF TY_FINAL,
+         VBELN TYPE VBELN_VA,
+         ERDAT TYPE  ERDAT,
+         ERZET TYPE  ERZET,
+         ERNAM TYPE  ERNAM,
+         POSNR TYPE  POSNR_VA,
+         MATNR TYPE  MATNR,
+         ARKTX TYPE ARKTX,
+       END OF TY_FINAL.
+
+DATA: LT_VBAK  TYPE TABLE OF TY_VBAK,
+      LS_VBAK  TYPE TY_VBAK,
+      LT_VBAP  TYPE TABLE OF TY_VBAP,
+      LS_VBAP  TYPE TY_VBAP,
+      LT_FINAL TYPE TABLE OF TY_FINAL,
+      LS_FINAL TYPE TY_FINAL.
+
+
+DATA: LT_FIELDCAT TYPE LVC_T_FCAT,    "  FieldCatalog Internal Table
+      LS_FIELDCAT TYPE LVC_S_FCAT,    " Fieldcatalog Strature
+      LO_OBJECT   TYPE REF TO CL_GUI_CUSTOM_CONTAINER, " create container
+      LO_GRID     TYPE REF TO CL_GUI_ALV_GRID.         " create grid
+
+
+SELECT-OPTIONS: S_VBELN FOR VBAK-VBELN.
+
+START-OF-SELECTION.
+
+  SELECT
+    VBELN
+      ERDAT
+        ERZET
+          ERNAM
+    FROM VBAK INTO TABLE LT_VBAK
+    WHERE VBELN IN S_VBELN.
+
+  IF LT_VBAK IS NOT INITIAL.
+    SELECT
+      VBELN
+        POSNR
+          MATNR
+            ARKTX
+      FROM VBAP INTO TABLE LT_VBAP
+      FOR ALL ENTRIES IN LT_VBAK
+      WHERE VBELN = LT_VBAK-VBELN.
+  ENDIF.
+
+  LOOP AT LT_VBAK INTO LS_VBAK.
+    LS_FINAL-VBELN = LS_VBAK-VBELN.
+    LS_FINAL-ERDAT = LS_VBAK-ERDAT.
+    LS_FINAL-ERZET = LS_VBAK-ERZET.
+    LS_FINAL-ERNAM = LS_VBAK-ERNAM.
+    READ TABLE LT_VBAP INTO LS_VBAP WITH KEY VBELN = LS_VBAK-VBELN.
+    LS_FINAL-POSNR = LS_VBAP-POSNR.
+    LS_FINAL-MATNR = LS_VBAP-MATNR.
+    LS_FINAL-ARKTX = LS_VBAP-ARKTX.
+    APPEND LS_FINAL TO LT_FINAL.
+    CLEAR LS_FINAL.
+
+  ENDLOOP.
+
+
+  LS_FIELDCAT-COL_POS = '1'.
+  LS_FIELDCAT-FIELDNAME = 'VBELN'.
+  LS_FIELDCAT-SCRTEXT_M = 'Sales Document'.
+  APPEND LS_FIELDCAT TO LT_FIELDCAT.
+  CLEAR LS_FIELDCAT.
+
+  LS_FIELDCAT-COL_POS = '2'.
+  LS_FIELDCAT-FIELDNAME = 'ERDAT'.
+  LS_FIELDCAT-SCRTEXT_M = 'Create Date'.
+  APPEND LS_FIELDCAT TO LT_FIELDCAT.
+  CLEAR LS_FIELDCAT.
+
+  LS_FIELDCAT-COL_POS = '3'.
+  LS_FIELDCAT-FIELDNAME = 'ERZET'.
+  LS_FIELDCAT-SCRTEXT_M = 'Entry Time'.
+  APPEND LS_FIELDCAT TO LT_FIELDCAT.
+  CLEAR LS_FIELDCAT.
+
+  LS_FIELDCAT-COL_POS = '4'.
+  LS_FIELDCAT-FIELDNAME = 'ERNAM'.
+  LS_FIELDCAT-SCRTEXT_M = 'Name'.
+  APPEND LS_FIELDCAT TO LT_FIELDCAT.
+  CLEAR LS_FIELDCAT.
+
+  LS_FIELDCAT-COL_POS = '5'.
+  LS_FIELDCAT-FIELDNAME = 'POSNR'.
+  LS_FIELDCAT-SCRTEXT_M = 'Item'.
+  APPEND LS_FIELDCAT TO LT_FIELDCAT.
+  CLEAR LS_FIELDCAT.
+
+  LS_FIELDCAT-COL_POS = '6'.
+  LS_FIELDCAT-FIELDNAME = 'MATNR'.
+  LS_FIELDCAT-SCRTEXT_M = 'Matrial'.
+  APPEND LS_FIELDCAT TO LT_FIELDCAT.
+  CLEAR LS_FIELDCAT.
+
+  LS_FIELDCAT-COL_POS = '7'.
+  LS_FIELDCAT-FIELDNAME = 'ARKTX'.
+  LS_FIELDCAT-SCRTEXT_M = 'Text'.
+  APPEND LS_FIELDCAT TO LT_FIELDCAT.
+  CLEAR LS_FIELDCAT.
+
+
+*  CALL FUNCTION 'LVC_FIELDCATALOG_MERGE'
+*    EXPORTING
+**     I_BUFFER_ACTIVE        =
+*      I_STRUCTURE_NAME       = 'ZST_OD'
+**     I_CLIENT_NEVER_DISPLAY = 'X'
+**     I_BYPASSING_BUFFER     =
+**     I_INTERNAL_TABNAME     =
+*    CHANGING
+*      CT_FIELDCAT            = LT_FIELDCAT
+*    EXCEPTIONS
+*      INCONSISTENT_INTERFACE = 1
+*      PROGRAM_ERROR          = 2
+*      OTHERS                 = 3.
+
+
+  CREATE OBJECT LO_OBJECT         " create container
+    EXPORTING
+      CONTAINER_NAME = 'CONT'.
+
+  CREATE OBJECT LO_GRID     " call parent class - LO_OBJECT
+    EXPORTING
+      I_PARENT = LO_OBJECT.
+
+  CALL METHOD LO_GRID->SET_TABLE_FOR_FIRST_DISPLAY     " Display grid alv
+    CHANGING
+      IT_OUTTAB                     = LT_FINAL
+      IT_FIELDCATALOG               = LT_FIELDCAT
+*     IT_SORT                       =
+*     IT_FILTER                     =
+    EXCEPTIONS
+      INVALID_PARAMETER_COMBINATION = 1
+      PROGRAM_ERROR                 = 2
+      TOO_MANY_LINES                = 3
+      OTHERS                        = 4.
+  CALL SCREEN  '0100'.
+*&---------------------------------------------------------------------*
+*&      Module  USER_COMMAND_0100  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE USER_COMMAND_0100 INPUT.   " Button Enable
+  IF SY-UCOMM = 'E'.
+    LEAVE TO SCREEN 0.
+  ENDIF.
+ENDMODULE.
