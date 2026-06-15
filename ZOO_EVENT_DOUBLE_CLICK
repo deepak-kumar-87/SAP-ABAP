@@ -1,0 +1,303 @@
+*&---------------------------------------------------------------------*
+*& Report ZOO_EVANT_HANDLE
+*&---------------------------------------------------------------------*
+*& Purpose:
+*& Display Sales Orders (VBAK) in first ALV.
+*& When user clicks on VBELN (Hotspot), related Sales Order Items
+*& (VBAP) are displayed in second ALV.
+*&---------------------------------------------------------------------*
+REPORT ZOO_EVANT_HANDLE.
+
+*---------------------------------------------------------------------*
+* Database Tables
+*---------------------------------------------------------------------*
+TABLES: VBAK, VBAP.
+
+*---------------------------------------------------------------------*
+* Structure for Sales Order Header Data (VBAK)
+*---------------------------------------------------------------------*
+TYPES: BEGIN OF TY_VBAK,
+         VBELN TYPE VBELN_VA,   "Sales Document Number
+         ERDAT TYPE ERDAT,      "Created Date
+         ERZET TYPE ERZET,      "Created Time
+         ERNAM TYPE ERNAM,      "Created By
+         VBTYP TYPE VBTYPL,     "Document Category
+       END OF TY_VBAK.
+
+*---------------------------------------------------------------------*
+* Structure for Sales Order Item Data (VBAP)
+*---------------------------------------------------------------------*
+TYPES: BEGIN OF TY_VBAP,
+         VBELN TYPE VBELN_VA,   "Sales Document Number
+         POSNR TYPE POSNR_VA,   "Item Number
+         MATNR TYPE MATNR,      "Material Number
+         ARKTX TYPE ARKTX,      "Material Description
+       END OF TY_VBAP.
+
+*---------------------------------------------------------------------*
+* Internal Tables & Work Areas
+*---------------------------------------------------------------------*
+DATA: LT_VBAK TYPE TABLE OF TY_VBAK,
+      LS_VBAK TYPE TY_VBAK,
+      LT_VBAP TYPE TABLE OF TY_VBAP,
+      LS_VBAP TYPE TY_VBAP.
+
+*---------------------------------------------------------------------*
+* ALV Field Catalogs
+*---------------------------------------------------------------------*
+DATA: LT_FIELDCAT1 TYPE LVC_T_FCAT,
+      LS_FIELDCAT1 TYPE LVC_S_FCAT,
+      LT_FIELDCAT2 TYPE LVC_T_FCAT,
+      LS_FIELDCAT2 TYPE LVC_S_FCAT.
+
+*---------------------------------------------------------------------*
+* Used to Store Selected Row Information
+*---------------------------------------------------------------------*
+DATA: LT_ROWS TYPE LVC_T_ROW,
+      LS_ROWS TYPE LVC_S_ROW.
+
+*---------------------------------------------------------------------*
+* Custom Containers and ALV Grid Objects
+*---------------------------------------------------------------------*
+DATA: LO_OBJECT1 TYPE REF TO CL_GUI_CUSTOM_CONTAINER,
+      LO_OBJECT2 TYPE REF TO CL_GUI_CUSTOM_CONTAINER,
+      LO_GRID1   TYPE REF TO CL_GUI_ALV_GRID,
+      LO_GRID2   TYPE REF TO CL_GUI_ALV_GRID.
+
+*---------------------------------------------------------------------*
+* Selection Screen
+*---------------------------------------------------------------------*
+SELECT-OPTIONS: S_VBELN FOR VBAK-VBELN.
+
+*---------------------------------------------------------------------*
+* Local Event Handler Class
+*---------------------------------------------------------------------*
+CLASS CL_EVENT DEFINITION.
+  PUBLIC SECTION.
+
+    "Triggered when user clicks hotspot field
+    METHODS HANDLE
+      FOR EVENT HOTSPOT_CLICK OF CL_GUI_ALV_GRID.
+
+ENDCLASS.
+
+*---------------------------------------------------------------------*
+* Event Handler Implementation
+*---------------------------------------------------------------------*
+CLASS CL_EVENT IMPLEMENTATION.
+
+  METHOD HANDLE.
+
+    "Get selected row from Header ALV
+    CALL METHOD LO_GRID1->GET_SELECTED_ROWS
+      IMPORTING
+        ET_INDEX_ROWS = LT_ROWS.
+
+    "Read first selected row
+    READ TABLE LT_ROWS INTO LS_ROWS INDEX 1.
+
+    IF SY-SUBRC = 0.
+
+      "Get corresponding sales order from internal table
+      READ TABLE LT_VBAK INTO LS_VBAK INDEX LS_ROWS-INDEX.
+
+      IF SY-SUBRC = 0.
+
+        "Fetch item details for selected Sales Order
+        SELECT VBELN
+               POSNR
+               MATNR
+               ARKTX
+          FROM VBAP
+          INTO TABLE LT_VBAP
+          WHERE VBELN = LS_VBAK-VBELN.
+
+        "Display item details in second ALV
+        CALL METHOD LO_GRID2->SET_TABLE_FOR_FIRST_DISPLAY
+          CHANGING
+            IT_OUTTAB       = LT_VBAP
+            IT_FIELDCATALOG = LT_FIELDCAT2
+          EXCEPTIONS
+            INVALID_PARAMETER_COMBINATION = 1
+            PROGRAM_ERROR                 = 2
+            TOO_MANY_LINES                = 3
+            OTHERS                        = 4.
+
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+*---------------------------------------------------------------------*
+* Main Processing Block
+*---------------------------------------------------------------------*
+START-OF-SELECTION.
+
+*---------------------------------------------------------------------*
+* Read Sales Order Header Data
+*---------------------------------------------------------------------*
+  SELECT VBELN
+         ERDAT
+         ERZET
+         ERNAM
+         VBTYP
+    FROM VBAK
+    INTO TABLE LT_VBAK
+    WHERE VBELN IN S_VBELN.
+
+*---------------------------------------------------------------------*
+* Field Catalog for First ALV (VBAK)
+*---------------------------------------------------------------------*
+
+* Sales Document Number
+  LS_FIELDCAT1-COL_OPT = 1.
+  LS_FIELDCAT1-FIELDNAME = 'VBELN'.
+  LS_FIELDCAT1-HOTSPOT = 'X'.      "Enable Click Event
+  LS_FIELDCAT1-TABNAME = 'LT_VBAK'.
+  LS_FIELDCAT1-SCRTEXT_M = 'Sales Document'.
+  APPEND LS_FIELDCAT1 TO LT_FIELDCAT1.
+  CLEAR LS_FIELDCAT1.
+
+* Creation Date
+  LS_FIELDCAT1-COL_OPT = 2.
+  LS_FIELDCAT1-FIELDNAME = 'ERDAT'.
+  LS_FIELDCAT1-TABNAME = 'LT_VBAK'.
+  LS_FIELDCAT1-SCRTEXT_M = 'Create Date'.
+  APPEND LS_FIELDCAT1 TO LT_FIELDCAT1.
+  CLEAR LS_FIELDCAT1.
+
+* Creation Time
+  LS_FIELDCAT1-COL_OPT = 3.
+  LS_FIELDCAT1-FIELDNAME = 'ERZET'.
+  LS_FIELDCAT1-TABNAME = 'LT_VBAK'.
+  LS_FIELDCAT1-SCRTEXT_M = 'Time'.
+  APPEND LS_FIELDCAT1 TO LT_FIELDCAT1.
+  CLEAR LS_FIELDCAT1.
+
+* User Name
+  LS_FIELDCAT1-COL_OPT = 4.
+  LS_FIELDCAT1-FIELDNAME = 'ERNAM'.
+  LS_FIELDCAT1-TABNAME = 'LT_VBAK'.
+  LS_FIELDCAT1-SCRTEXT_M = 'User Name'.
+  APPEND LS_FIELDCAT1 TO LT_FIELDCAT1.
+  CLEAR LS_FIELDCAT1.
+
+* Document Category
+  LS_FIELDCAT1-COL_OPT = 5.
+  LS_FIELDCAT1-FIELDNAME = 'VBTYP'.
+  LS_FIELDCAT1-TABNAME = 'LT_VBAK'.
+  LS_FIELDCAT1-SCRTEXT_M = 'Category'.
+  APPEND LS_FIELDCAT1 TO LT_FIELDCAT1.
+  CLEAR LS_FIELDCAT1.
+
+*---------------------------------------------------------------------*
+* Field Catalog for Second ALV (VBAP)
+*---------------------------------------------------------------------*
+
+* Sales Order Number
+  LS_FIELDCAT2-COL_OPT = 1.
+  LS_FIELDCAT2-FIELDNAME = 'VBELN'.
+  LS_FIELDCAT2-TABNAME = 'LT_VBAP'.
+  LS_FIELDCAT2-SCRTEXT_M = 'Sales Document'.
+  APPEND LS_FIELDCAT2 TO LT_FIELDCAT2.
+  CLEAR LS_FIELDCAT2.
+
+* Item Number
+  LS_FIELDCAT2-COL_OPT = 2.
+  LS_FIELDCAT2-FIELDNAME = 'POSNR'.
+  LS_FIELDCAT2-TABNAME = 'LT_VBAP'.
+  LS_FIELDCAT2-SCRTEXT_M = 'Item'.
+  APPEND LS_FIELDCAT2 TO LT_FIELDCAT2.
+  CLEAR LS_FIELDCAT2.
+
+* Material Number
+  LS_FIELDCAT2-COL_OPT = 3.
+  LS_FIELDCAT2-FIELDNAME = 'MATNR'.
+  LS_FIELDCAT2-TABNAME = 'LT_VBAP'.
+  LS_FIELDCAT2-SCRTEXT_M = 'Material'.
+  APPEND LS_FIELDCAT2 TO LT_FIELDCAT2.
+  CLEAR LS_FIELDCAT2.
+
+* Material Description
+  LS_FIELDCAT2-COL_OPT = 4.
+  LS_FIELDCAT2-FIELDNAME = 'ARKTX'.
+  LS_FIELDCAT2-TABNAME = 'LT_VBAP'.
+  LS_FIELDCAT2-SCRTEXT_M = 'Text'.
+  APPEND LS_FIELDCAT2 TO LT_FIELDCAT2.
+  CLEAR LS_FIELDCAT2.
+
+*---------------------------------------------------------------------*
+* Create Custom Containers
+*---------------------------------------------------------------------*
+  CREATE OBJECT LO_OBJECT1
+    EXPORTING
+      CONTAINER_NAME = 'CONT1'.
+
+  CREATE OBJECT LO_OBJECT2
+    EXPORTING
+      CONTAINER_NAME = 'CONT2'.
+
+*---------------------------------------------------------------------*
+* Create ALV Grid Objects
+*---------------------------------------------------------------------*
+  CREATE OBJECT LO_GRID1
+    EXPORTING
+      I_PARENT = LO_OBJECT1.
+
+  CREATE OBJECT LO_GRID2
+    EXPORTING
+      I_PARENT = LO_OBJECT2.
+
+*---------------------------------------------------------------------*
+* Register Event Handler
+*---------------------------------------------------------------------*
+  DATA LO_OBJ TYPE REF TO CL_EVENT.
+
+  CREATE OBJECT LO_OBJ.
+
+  SET HANDLER LO_OBJ->HANDLE FOR LO_GRID1.
+
+*---------------------------------------------------------------------*
+* Display Header ALV
+*---------------------------------------------------------------------*
+  CALL METHOD LO_GRID1->SET_TABLE_FOR_FIRST_DISPLAY
+    CHANGING
+      IT_OUTTAB       = LT_VBAK
+      IT_FIELDCATALOG = LT_FIELDCAT1
+    EXCEPTIONS
+      INVALID_PARAMETER_COMBINATION = 1
+      PROGRAM_ERROR                 = 2
+      TOO_MANY_LINES                = 3
+      OTHERS                        = 4.
+
+*---------------------------------------------------------------------*
+* Call Custom Screen
+*---------------------------------------------------------------------*
+  CALL SCREEN 0110.
+
+*&---------------------------------------------------------------------*
+*& Module STATUS_0110 OUTPUT
+*&---------------------------------------------------------------------*
+MODULE STATUS_0110 OUTPUT.
+
+* Set GUI Status
+  SET PF-STATUS 'PF_SALES'.
+
+* Set Screen Title
+  SET TITLEBAR 'ORD'.
+
+ENDMODULE.
+
+*&---------------------------------------------------------------------*
+*& Module USER_COMMAND_0110 INPUT
+*&---------------------------------------------------------------------*
+MODULE USER_COMMAND_0110 INPUT.
+
+* Exit Screen on Cancel Button
+  IF SY-UCOMM = 'CANCEL'.
+    LEAVE TO SCREEN 0.
+  ENDIF.
+
+ENDMODULE.
