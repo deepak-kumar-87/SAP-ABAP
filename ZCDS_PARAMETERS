@@ -1,0 +1,29 @@
+@AbapCatalog.sqlViewName: 'ZSQLSOCDS'
+@AbapCatalog.compiler.compareFilter: true
+@AbapCatalog.preserveKey: true
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'Sales Order with cds'
+@Metadata.ignorePropagatedAnnotations: true
+define view zsocds with parameters p_vbeln : vbeln_va as select from vbak 
+{
+    key vbeln, erdat 
+}
+where vbeln = $parameters.p_vbeln
+
+
+*&---------------------------------------------------------------------*
+*& Report ZBT_CDS_SO
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT ZBT_CDS_SO.
+
+PARAMETERS p_so TYPE vbeln_va.
+
+select * from zsocds( p_vbeln = @p_so ) INTO TABLE @data(lt_cds).
+
+
+  CALL METHOD CL_DEMO_OUTPUT=>DISPLAY
+    EXPORTING
+      DATA   = lt_cds
+      .
