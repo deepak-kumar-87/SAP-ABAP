@@ -1,0 +1,39 @@
+@AbapCatalog.sqlViewName: 'ZSQLCONDITION'
+@AbapCatalog.compiler.compareFilter: true
+@AbapCatalog.preserveKey: true
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+@EndUserText.label: 'Candition base cds'
+@Metadata.ignorePropagatedAnnotations: true
+define view zcds_condition with parameters p_so : vbeln_va
+  as select from vbak
+{
+  key vbak.vbeln,
+      vbak.audat,
+      vbak.ernam,
+      vbak.netwr,
+      vbak.auart,
+      vbak.vbtyp,
+
+      case vbak.vbtyp
+      when 'C' then 'Internal Order'
+      when 'A' then 'External Order'
+      else 'In Progress'
+      end as Discription
+} where vbeln = $parameters.p_so
+
+
+*&---------------------------------------------------------------------*
+*& Report ZCDS_CONDITION
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT ZCDS_CONDITION.
+
+PARAMETERS: pvbeln TYPE vbeln_va.
+
+  select * FROM ZSQLCONDITION( p_so = @pvbeln ) INTO TABLE @data(lt_final).
+
+    CALL METHOD CL_DEMO_OUTPUT=>DISPLAY
+      EXPORTING
+        DATA   = lt_final.
+        .
