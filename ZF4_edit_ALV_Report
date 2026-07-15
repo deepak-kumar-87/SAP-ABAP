@@ -1,0 +1,439 @@
+
+*&---------------------------------------------------------------------*
+*& Report ZFI_AW_PO
+*&---------------------------------------------------------------------*
+*& Vendor / Bank / Withholding-tax "without PO" maintenance report
+*& - Displays vendor, bank and (if existing) ZWITHOUTPO data in an
+*&   editable ALV grid.
+*& - User ticks the "Select" checkbox on the rows they want to work on.
+*& - Editable cells: PRCTR, DMBTR, TDS_CODE, WITHHOLDING_TAX_BASE,
+*&   TDS, TEXT.
+*& - PAYABLE_AMOUNT is always system-calculated (DMBTR - TDS) on save.
+*& - Pressing "Save" (SAVE) syncs the frontend grid to the backend
+*&   table, validates the selected rows, and UPDATEs/INSERTs them
+*&   into ZWITHOUTPO.
+*&---------------------------------------------------------------------*
+
+
+TABLES: lfa1, lfb1, t059zt, zwithoutpo.
+
+*----------------------------------------------------------------------*
+* Types
+*----------------------------------------------------------------------*
+TYPES: BEGIN OF ty_final,
+         checkbox             TYPE c LENGTH 1,   " Row selected for save
+         lifnr                TYPE lifnr,        " LFA1 vendor code
+         bukrs                TYPE bukrs,        " LFB1 company code
+         name1                TYPE name1_gp,     " LFA1 vendor name
+         banks                TYPE banks,        " LFBK bank country
+         bank_name            TYPE banka,        " Bank Name
+         bankl                TYPE bankk,        " LFBK bank key
+         bankn                TYPE bankn,        " LFBK account no.
+         prctr                TYPE prctr,        " Profit center
+         dmbtr                TYPE i,            " Amount
+         tds_code             TYPE wt_withcd,    " TDS (WHT) code
+         withholding_tax_base TYPE i,            " Tax base
+         tds                  TYPE dmbtr,        " TDS amount
+         payable_amount       TYPE dmbtr,        " Payable amount (calculated)
+         text                 TYPE char40,       " Short text
+         exists               TYPE c LENGTH 1,   " 'X' if a ZWITHOUTPO row already exists
+         tax_cal              TYPE     qsatz,    " Tax Calculate
+       END OF ty_final.
+
+TYPES: BEGIN OF ty_csks,
+         prctr TYPE prctr,
+         bukrs TYPE bukrs,
+         ltext TYPE ltext,
+       END OF ty_csks.
+
+TYPES: BEGIN OF ty_t059z,
+         land1     TYPE land1,
+         witht     TYPE witht,
+         wt_withcd TYPE wt_withcd,
+         text40    TYPE text40,
+       END OF ty_t059z.
+
+DATA: gt_csks TYPE TABLE OF ty_csks.
+DATA: gt_t059z TYPE TABLE OF ty_t059z.
+
+DATA: gt_final TYPE TABLE OF ty_final,
+      gs_final TYPE ty_final.
+
+*----------------------------------------------------------------------*
+* Selection screen
+*----------------------------------------------------------------------*
+PARAMETERS s_bukrs TYPE  lfb1-bukrs.
+
+SELECT-OPTIONS: s_lifnr FOR lfa1-lifnr.
+
+
+*----------------------------------------------------------------------*
+* Global objects for the OO ALV grid on screen 0100
+*----------------------------------------------------------------------*
+DATA: go_container  TYPE REF TO cl_gui_custom_container,
+      go_grid       TYPE REF TO cl_gui_alv_grid,
+      gt_fieldcat   TYPE lvc_t_fcat,
+      gs_layout     TYPE lvc_s_layo,
+      g_okcode      TYPE sy-ucomm,
+      g_save_okcode TYPE sy-ucomm.
+
+*----------------------------------------------------------------------*
+* Main application class
+*----------------------------------------------------------------------*
+CLASS cl_aw_po DEFINITION.
+  PUBLIC SECTION.
+    METHODS:
+      get_data,
+      build_fieldcat,
+      display_data,
+      save_data,
+      register_f4,
+      handle_onf4 FOR EVENT onf4 OF cl_gui_alv_grid
+        IMPORTING e_fieldname es_row_no er_event_data.
+ENDCLASS.
+
+CLASS cl_aw_po IMPLEMENTATION.
+
+  METHOD get_data.
+
+    SELECT a~lifnr,
+            a~name1,
+              b~bukrs
+          FROM lfa1 AS a LEFT OUTER JOIN lfb1 AS b
+                    ON b~lifnr = a~lifnr
+          INTO TABLE @DATA(lt_lfa1)
+          WHERE a~lifnr IN @s_lifnr
+            AND b~bukrs = @s_bukrs.
+
+
+
+    IF lt_lfa1 IS NOT INITIAL.
+      SELECT a~lifnr,
+              a~banks,
+                a~bankl,
+                  a~bankn,
+                    b~banka
+              FROM lfbk AS a INNER JOIN bnka AS b
+                        ON b~bankl = a~bankl
+              INTO TABLE @DATA(lt_lfbk)
+              FOR ALL ENTRIES IN @lt_lfa1
+              WHERE a~lifnr = @lt_lfa1-lifnr
+                AND a~banks = 'IN'.
+
+      IF sy-subrc = 0.
+        SELECT lifnr,
+                bukrs,
+                  prctr,
+                    dmbtr,
+                      tds_code,
+                        withholding_tax_base,
+                          tds,
+                            payable_amount,
+                              text
+                      FROM zwithoutpo
+                      INTO TABLE @DATA(lt_zwithoutpo)
+                      FOR ALL ENTRIES IN @lt_lfbk
+                      WHERE lifnr = @lt_lfbk-lifnr.
+
+
+      ENDIF.
+    ENDIF.
+
+
+    SORT lt_lfbk BY lifnr.
+    SORT lt_zwithoutpo BY lifnr bukrs.
+
+    CLEAR gt_final.
+    LOOP AT lt_lfa1 ASSIGNING FIELD-SYMBOL(<ls_lfa1>).
+      CLEAR gs_final.
+      gs_final-lifnr = <ls_lfa1>-lifnr.
+      gs_final-name1 = <ls_lfa1>-name1.
+      gs_final-bukrs = <ls_lfa1>-bukrs.
+
+      READ TABLE lt_lfbk INTO DATA(ls_lfbk) WITH KEY lifnr = <ls_lfa1>-lifnr BINARY SEARCH.
+      IF sy-subrc = 0.
+        gs_final-banks = ls_lfbk-banks.
+        gs_final-bankl = ls_lfbk-bankl.
+        gs_final-bankn = ls_lfbk-bankn.
+        gs_final-bank_name = ls_lfbk-banka.
+      ENDIF.
+
+      READ TABLE lt_zwithoutpo INTO DATA(ls_withoutpo)
+        WITH KEY lifnr = <ls_lfa1>-lifnr bukrs = <ls_lfa1>-bukrs BINARY SEARCH.
+      IF sy-subrc = 0.
+        gs_final-prctr                = ls_withoutpo-prctr.
+        gs_final-dmbtr                = ls_withoutpo-dmbtr.
+        gs_final-tds_code             = ls_withoutpo-tds_code.
+        gs_final-withholding_tax_base = ls_withoutpo-withholding_tax_base.
+        gs_final-tds                  = ls_withoutpo-tds.
+        gs_final-payable_amount       = ls_withoutpo-payable_amount.
+        gs_final-text                 = ls_withoutpo-text.
+        gs_final-exists               = abap_true.
+      ENDIF.
+
+      APPEND gs_final TO gt_final.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD build_fieldcat.
+
+    SELECT a~prctr,
+            a~bukrs,
+              b~ltext
+      FROM cepc_bukrs AS a LEFT OUTER JOIN cepct AS b
+        ON b~prctr = a~prctr
+      INTO TABLE @gt_csks
+      WHERE bukrs = @s_bukrs AND b~spras = 'EN'.
+
+    SELECT a~land1, a~witht, a~wt_withcd, b~text40 FROM t059z AS a LEFT OUTER JOIN t059zt AS b
+      ON b~witht = a~witht AND  b~wt_withcd = a~wt_withcd
+       INTO TABLE @gt_t059z WHERE a~land1 = 'IN'.
+
+    CLEAR gt_fieldcat.
+    gt_fieldcat = VALUE lvc_t_fcat(
+      ( fieldname = 'CHECKBOX'             scrtext_m = 'Select'          checkbox = abap_true edit = abap_true )
+      ( fieldname = 'LIFNR'                scrtext_m = 'Vendor'          key = abap_true )
+      ( fieldname = 'NAME1'                scrtext_m = 'Vendor Name' )
+      ( fieldname = 'BUKRS'                scrtext_m = 'Company Code'        key = abap_true )
+      ( fieldname = 'PRCTR'                scrtext_m = 'Profit Center'  edit = abap_true f4availabl = abap_true )
+      ( fieldname = 'DMBTR'                scrtext_m = 'Amount'         edit = abap_true  )
+      ( fieldname = 'TDS_CODE'             scrtext_m = 'TDS Code'       edit = abap_true f4availabl = abap_true  ) "ref_table = 'ZWITHOUTPO'   ref_field = 'TDS_CODE'
+      ( fieldname = 'WITHHOLDING_TAX_BASE' scrtext_m = 'Withholding Tax Base'       edit = abap_true )
+      ( fieldname = 'TDS'                  scrtext_m = 'TDS Amount'     )
+      ( fieldname = 'PAYABLE_AMOUNT'       scrtext_m = 'Payable Amount' edit = abap_false )
+      ( fieldname = 'bank_name'            scrtext_m = 'Bank Name' )
+      ( fieldname = 'BANKL'                scrtext_m = 'Bank Key' )
+      ( fieldname = 'BANKN'                scrtext_m = 'Account No' )
+      ( fieldname = 'TEXT'                 scrtext_m = 'Text'           edit = abap_true )
+      ( fieldname = 'EXISTS'               scrtext_m = 'Existing entry'  tech = abap_true )
+    ).
+
+    gs_layout-cwidth_opt = abap_true.
+    gs_layout-sel_mode   = 'A'.
+  ENDMETHOD.
+
+  METHOD display_data.
+    CALL SCREEN 0100.
+
+  ENDMETHOD.
+
+  METHOD save_data.
+    DATA: lt_mod   TYPE TABLE OF zwithoutpo,
+          ls_mod   TYPE zwithoutpo,
+          lv_count TYPE i.
+
+    " Force the grid to push any cell the user is still editing back
+    " into gt_final before we read it.
+    IF go_grid IS BOUND.
+      go_grid->check_changed_data( ).
+    ENDIF.
+
+
+    SELECT wt_withcd,
+             qsatz
+       FROM t059z INTO TABLE @DATA(lt_t059z)
+       FOR ALL ENTRIES IN @gt_final
+       WHERE land1 = 'IN'
+         AND wt_withcd = @gt_final-tds_code.
+
+    LOOP AT gt_final INTO gs_final WHERE checkbox = abap_true .
+      READ TABLE lt_t059z INTO DATA(ls_t059z) WITH KEY wt_withcd = gs_final-tds_code.
+      gs_final-tax_cal = ls_t059z-qsatz.
+
+      MODIFY  gt_final FROM gs_final TRANSPORTING tax_cal.
+    ENDLOOP.
+
+    LOOP AT gt_final INTO gs_final WHERE checkbox = abap_true.
+      " Basic validation - a TDS code needs a tax base to make sense
+      IF gs_final-tds_code IS NOT INITIAL AND gs_final-withholding_tax_base IS INITIAL.
+        MESSAGE |Vendor { gs_final-lifnr }: Tax base is required when a TDS code is entered| TYPE 'S' DISPLAY LIKE 'E'.
+        CONTINUE.
+      ENDIF.
+
+      CLEAR ls_mod.
+      ls_mod-lifnr                = gs_final-lifnr.
+      ls_mod-bukrs                = gs_final-bukrs.
+      ls_mod-prctr                = gs_final-prctr.
+      ls_mod-dmbtr                = gs_final-dmbtr.
+      ls_mod-tds_code             = gs_final-tds_code.
+      ls_mod-withholding_tax_base = gs_final-withholding_tax_base.
+      ls_mod-tds                  = gs_final-withholding_tax_base * gs_final-tax_cal / 100.
+      ls_mod-name1                  = gs_final-name1.
+      ls_mod-payable_amount       = gs_final-dmbtr - ls_mod-tds.  " always recalculated
+      ls_mod-text                 = gs_final-text.
+      ls_mod-bankl                 = gs_final-bankl.
+      ls_mod-bankn                 = gs_final-bankn.
+      ls_mod-bank_name             = gs_final-bank_name.
+
+      APPEND ls_mod TO lt_mod.
+      lv_count = lv_count + 1.
+    ENDLOOP.
+
+    IF lt_mod IS INITIAL.
+      MESSAGE 'No rows selected (tick the Select checkbox) or nothing to save' TYPE 'S' DISPLAY LIKE 'W'.
+      RETURN.
+    ENDIF.
+
+    MODIFY zwithoutpo FROM TABLE lt_mod.
+    IF sy-subrc = 0.
+*      COMMIT WORK AND WAIT.
+      COMMIT WORK.
+      MESSAGE |{ lv_count } row(s) saved to ZWITHOUTPO| TYPE 'S'.
+      " Refresh so PAYABLE_AMOUNT / EXISTS reflect what was just saved
+      get_data( ).
+      IF go_grid IS BOUND.
+        go_grid->refresh_table_display( ).
+      ENDIF.
+    ELSE.
+      ROLLBACK WORK.
+      MESSAGE 'Save failed - please check the entries and try again' TYPE 'S' DISPLAY LIKE 'E'.
+    ENDIF.
+
+
+  ENDMETHOD.
+  METHOD register_f4.
+    DATA: lt_f4 TYPE lvc_t_f4.
+
+    lt_f4 = VALUE #( ( fieldname = 'PRCTR' register = abap_true )
+                    ( fieldname = 'TDS_CODE' register = abap_true ) ).
+
+    go_grid->register_f4_for_fields( it_f4 = lt_f4 ).
+
+    SET HANDLER handle_onf4 FOR go_grid.
+  ENDMETHOD.
+
+  METHOD handle_onf4.
+    DATA: lt_return TYPE TABLE OF ddshretval,
+          lv_row    TYPE i,
+          ls_row_id TYPE lvc_s_row,
+          ls_col_id TYPE lvc_s_col,
+          ls_row_no TYPE lvc_s_roid.
+
+    IF e_fieldname = 'PRCTR'.
+
+      go_grid->get_current_cell(
+        IMPORTING
+          e_row     = lv_row       " plain integer row index - always safe to use
+          es_row_id = ls_row_id
+          es_col_id = ls_col_id
+          es_row_no = ls_row_no ).
+
+      CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
+        EXPORTING
+          retfield        = 'PRCTR'
+          dynpprog        = sy-cprog
+          dynpnr          = sy-dynnr
+          dynprofield     = 'GT_FINAL-PRCTR'
+          value_org       = 'S'
+        TABLES
+          value_tab       = gt_csks
+          return_tab      = lt_return
+        EXCEPTIONS
+          parameter_error = 1
+          no_values_found = 2
+          OTHERS          = 3.
+
+      IF sy-subrc = 0 AND lt_return IS NOT INITIAL.
+        go_grid->set_current_cell_via_id(
+          is_row_id    = ls_row_id
+          is_column_id = ls_col_id
+          is_row_no    = ls_row_no ).
+
+        MODIFY gt_final INDEX lv_row
+          FROM VALUE ty_final( prctr = lt_return[ 1 ]-fieldval )
+          TRANSPORTING prctr.
+
+        go_grid->refresh_table_display( ).
+      ENDIF.
+    ELSEIF e_fieldname = 'TDS_CODE'.
+      go_grid->get_current_cell(
+      IMPORTING
+        e_row     = lv_row       " plain integer row index - always safe to use
+        es_row_id = ls_row_id
+        es_col_id = ls_col_id
+        es_row_no = ls_row_no ).
+
+      CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
+        EXPORTING
+          retfield        = 'WT_WITHCD'
+          dynpprog        = sy-cprog
+          dynpnr          = sy-dynnr
+          dynprofield     = 'GT_FINAL-TDS_CODE'
+          value_org       = 'S'
+        TABLES
+          value_tab       = gt_t059z
+          return_tab      = lt_return
+        EXCEPTIONS
+          parameter_error = 1
+          no_values_found = 2
+          OTHERS          = 3.
+
+      IF sy-subrc = 0 AND lt_return IS NOT INITIAL.
+        go_grid->set_current_cell_via_id(
+          is_row_id    = ls_row_id
+          is_column_id = ls_col_id
+          is_row_no    = ls_row_no ).
+
+        MODIFY gt_final INDEX lv_row
+          FROM VALUE ty_final( tds_code = lt_return[ 1 ]-fieldval )
+          TRANSPORTING tds_code.
+
+        go_grid->refresh_table_display( ).
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+*----------------------------------------------------------------------*
+* Start-of-selection
+*----------------------------------------------------------------------*
+START-OF-SELECTION.
+  DATA(go_obj) = NEW cl_aw_po( ).
+
+  go_obj->get_data( ).
+  go_obj->build_fieldcat( ).
+  go_obj->display_data( ).
+*  go_obj->save_data( ).
+
+*&---------------------------------------------------------------------*
+*&      Module  STATUS_0100  OUTPUT
+*&---------------------------------------------------------------------*
+MODULE status_0100 OUTPUT.
+  SET PF-STATUS 'STATUS100'.
+  SET TITLEBAR 'TITLE100'.
+
+  IF go_container IS NOT BOUND.
+    go_container = NEW cl_gui_custom_container( container_name = 'GRID_CONTAINER' ).
+    go_grid       = NEW cl_gui_alv_grid( i_parent = go_container ).
+
+    go_obj->build_fieldcat( ).
+
+    go_grid->set_table_for_first_display(
+      EXPORTING
+        is_layout       = gs_layout
+      CHANGING
+        it_outtab       = gt_final
+        it_fieldcatalog = gt_fieldcat ).
+    go_obj->register_f4( ).
+  ENDIF.
+ENDMODULE.
+
+*&---------------------------------------------------------------------*
+*&      Module  USER_COMMAND_0100  INPUT
+*&---------------------------------------------------------------------*
+MODULE user_command_0100 INPUT.
+  g_okcode = sy-ucomm.
+  CLEAR sy-ucomm.
+
+  CASE g_okcode.
+    WHEN 'SAVE'.
+      go_obj->save_data( ).
+
+    WHEN 'BACK' OR 'EXIT' OR 'CANCEL'.
+      LEAVE TO SCREEN 0.
+
+
+  ENDCASE.
+ENDMODULE.
