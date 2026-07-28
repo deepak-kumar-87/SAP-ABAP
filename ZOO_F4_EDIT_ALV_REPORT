@@ -1,0 +1,351 @@
+*&---------------------------------------------------------------------*
+*& Report ZFI_GL_PAYMENT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT zfi_gl_payment.
+
+TABLES: skb1, skat.
+TYPES: BEGIN OF ty_skb1,
+         bukrs TYPE bukrs,
+         saknr TYPE saknr,
+         txt20 TYPE txt20,
+       END OF ty_skb1.
+
+TYPES: BEGIN OF ty_gl,
+         checkbox  TYPE c LENGTH 1,
+         saknr     TYPE  saknr,
+         bukrs     TYPE  bukrs,
+         txt20     TYPE  txt20,
+         posid     TYPE  ps_posid,
+         prctr     TYPE  prctr,
+         invoiceno TYPE  char10,
+         amount    TYPE  i,
+         name      TYPE  char40,
+         bank_name TYPE  banka,
+         bankl     TYPE  bankk,
+         bankn     TYPE  bankn,
+         text      TYPE  char40,
+       END OF ty_gl.
+
+TYPES: BEGIN OF ty_prps,
+         pbukr TYPE ps_pbukr,
+         posid TYPE ps_posid,
+         prctr TYPE prctr,
+       END OF ty_prps.
+
+DATA: lt_prps TYPE TABLE OF ty_prps.
+
+DATA: lt_skb1  TYPE TABLE OF ty_skb1,
+      lt_final TYPE TABLE OF ty_gl,
+      ls_final TYPE ty_gl.
+
+DATA: gt_fieldcat   TYPE lvc_t_fcat,
+      gs_layout     TYPE lvc_s_layo,
+      go_container  TYPE REF TO cl_gui_custom_container,
+      go_grid       TYPE REF TO cl_gui_alv_grid,
+      g_okcode      TYPE sy-ucomm,
+      g_save_okcode TYPE sy-ucomm.
+
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
+  PARAMETERS b_bukrs TYPE skb1-bukrs.
+  SELECT-OPTIONS s_saknr FOR skb1-saknr.
+
+SELECTION-SCREEN END OF BLOCK b1.
+
+CLASS cl_gl DEFINITION.
+  PUBLIC SECTION.
+    METHODS: get_data,
+      fieldcat,
+      display_data,
+      save_data,
+      register_f4,
+      handle_onf4 FOR EVENT onf4 OF cl_gui_alv_grid
+        IMPORTING e_fieldname es_row_no er_event_data.
+
+ENDCLASS.
+
+CLASS cl_gl IMPLEMENTATION.
+  METHOD get_data.
+    SELECT
+        a~bukrs,
+            a~saknr,
+              b~txt20
+      FROM skb1 AS a LEFT OUTER JOIN
+      skat AS b ON b~saknr = a~saknr
+      INTO TABLE @lt_skb1
+      WHERE a~bukrs = @b_bukrs
+        AND a~saknr IN @s_saknr
+        AND b~spras = 'E'.
+    IF sy-subrc = 0.
+      SELECT
+          saknr,
+            bukrs,
+              txt20,
+                posid,
+                  prctr,
+                    invoiceno,
+                      amount,
+                        name,
+                          bank_name,
+                            bankl,
+                              bankn,
+                                text
+        FROM zfl_payment INTO TABLE @DATA(lt_glpaymet)
+        FOR ALL ENTRIES IN @lt_skb1
+        WHERE saknr = @lt_skb1-saknr.
+    ENDIF.
+
+    SORT lt_skb1 BY saknr.
+
+    CLEAR lt_final.
+    LOOP AT lt_skb1 ASSIGNING FIELD-SYMBOL(<fs_skb1>).
+      CLEAR ls_final.
+      ls_final-saknr = <fs_skb1>-saknr.
+      ls_final-bukrs = <fs_skb1>-bukrs.
+      ls_final-txt20 = <fs_skb1>-txt20.
+      READ TABLE lt_glpaymet INTO DATA(ls_glpaymet) WITH KEY saknr = <fs_skb1>-saknr.
+      IF sy-subrc = 0.
+        ls_final-posid     = ls_glpaymet-posid.
+        ls_final-prctr     = ls_glpaymet-prctr.
+        ls_final-invoiceno = ls_glpaymet-invoiceno.
+        ls_final-amount    = ls_glpaymet-amount.
+        ls_final-name      = ls_glpaymet-name.
+        ls_final-bank_name = ls_glpaymet-bank_name.
+        ls_final-bankl     = ls_glpaymet-bankl.
+        ls_final-bankn     = ls_glpaymet-bankn.
+        ls_final-text      = ls_glpaymet-text.
+      ENDIF.
+      APPEND ls_final TO lt_final.
+      SORT lt_final BY saknr.
+
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD fieldcat.
+
+    SELECT
+      pbukr,
+        posid,
+          prctr
+      FROM prps
+      INTO TABLE @lt_prps WHERE pbukr = @b_bukrs.
+
+    gt_fieldcat = VALUE lvc_t_fcat(
+       ( fieldname = 'CHECKBOX' scrtext_m = 'Select' checkbox = abap_true edit = abap_true )
+      ( fieldname = 'SAKNR'  scrtext_m = 'GL Code')
+      ( fieldname = 'BUKRS'  scrtext_m = 'Company Code')
+      ( fieldname = 'TXT20'  scrtext_m = 'GL Name')
+      ( fieldname = 'POSID'  scrtext_m = 'WBS Element' f4availabl = abap_true edit = abap_true  )
+      ( fieldname = 'PRCTR'  scrtext_m = 'Cost Center' f4availabl = abap_true edit = abap_true  )
+      ( fieldname = 'INVOICENO'  scrtext_m = 'Invoice No/Voucher Ref.' edit = abap_true  )
+      ( fieldname = 'AMOUNT'  scrtext_m = 'Payable Amount' edit = abap_true  )
+      ( fieldname = 'NAME'  scrtext_m = 'Payee Name' edit = abap_true  outputlen = 40 )
+      ( fieldname = 'BANK_NAME'  scrtext_m = 'Bank Name' edit = abap_true  )
+      ( fieldname = 'BANKL'  scrtext_m = 'Bank Account No.' edit = abap_true outputlen = 18  )
+      ( fieldname = 'BANKN'  scrtext_m = 'Bank Key' edit = abap_true outputlen = 11 )
+      ( fieldname = 'TEXT'  scrtext_m = 'Text' edit = abap_true outputlen = 40 )
+    ).
+    gs_layout-cwidth_opt = abap_true.
+    gs_layout-sel_mode = 'A'.
+  ENDMETHOD.
+
+  METHOD display_data.
+    CALL SCREEN 0100.
+  ENDMETHOD.
+  METHOD save_data.
+    DATA: lt_mod   TYPE TABLE OF zfl_payment,
+          ls_mod   TYPE zfl_payment,
+          lv_count TYPE i.
+
+    IF go_grid IS BOUND.
+      go_grid->check_changed_data( ).
+    ENDIF.
+
+
+    LOOP AT lt_final INTO ls_final WHERE checkbox = abap_true.
+      CLEAR ls_mod.
+      ls_mod-saknr = ls_final-saknr.
+      ls_mod-bukrs = ls_final-bukrs.
+      ls_mod-txt20 = ls_final-txt20.
+      ls_mod-posid = ls_final-posid.
+      ls_mod-prctr = ls_final-prctr.
+      ls_mod-invoiceno = ls_final-invoiceno.
+      ls_mod-amount = ls_final-amount.
+      ls_mod-name = ls_final-name.
+      ls_mod-bank_name = ls_final-bank_name.
+      ls_mod-bankl = ls_final-bankl.
+      ls_mod-bankn = ls_final-bankn.
+      ls_mod-text = ls_final-text.
+
+      APPEND ls_mod TO lt_mod.
+      lv_count = lv_count + 1.
+
+      IF  lt_mod IS INITIAL.
+        MESSAGE 'No rows selected (tick the Select checkbox) or nothing to save' TYPE 'S' DISPLAY LIKE 'W'.
+        RETURN.
+      ENDIF.
+
+      MODIFY zfl_payment FROM TABLE lt_mod.
+      IF sy-subrc = 0.
+
+        COMMIT WORK.
+        MESSAGE |{ lv_count } row(s) saved to ZFL_PAYMENT| TYPE 'S'.
+        get_data( ).
+        IF go_grid IS BOUND.
+          go_grid->refresh_table_display( ).
+        ENDIF.
+      ELSE.
+        ROLLBACK WORK.
+        MESSAGE 'Save failed - please check the entries and try again' TYPE 'S' DISPLAY LIKE 'E'.
+
+      ENDIF.
+
+    ENDLOOP.
+
+
+  ENDMETHOD.
+  METHOD register_f4.
+    DATA: lt_f4 TYPE lvc_t_f4.
+    lt_f4 = VALUE #(
+                    ( fieldname = 'POSID' register = abap_true )
+                    ( fieldname = 'PRCTR' register = abap_true )
+                    ).
+    go_grid->register_f4_for_fields( it_f4 = lt_f4 ).
+
+    SET HANDLER handle_onf4 FOR go_grid.
+  ENDMETHOD.
+  METHOD handle_onf4.
+    DATA: lt_return TYPE TABLE OF ddshretval,
+          lv_row    TYPE i,
+          ls_row_id TYPE lvc_s_row,
+          ls_col_id TYPE lvc_s_col,
+          ls_row_no TYPE lvc_s_roid.
+    go_grid->get_current_cell(
+  IMPORTING
+    e_row     = lv_row
+    es_row_id = ls_row_id
+    es_col_id = ls_col_id
+    es_row_no = ls_row_no
+).
+
+
+    CASE e_fieldname.
+      WHEN 'POSID'.
+        CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
+          EXPORTING
+            retfield        = 'POSID'
+            dynpprog        = sy-cprog
+            dynpnr          = sy-dyngr
+            dynprofield     = 'LT_FINAL-POSID'
+            value_org       = 'S'
+          TABLES
+            value_tab       = lt_prps
+            return_tab      = lt_return
+          EXCEPTIONS
+            parameter_error = 1
+            no_values_found = 2
+            OTHERS          = 3.
+
+        IF sy-subrc = 0 AND lt_return IS NOT INITIAL.
+          go_grid->set_current_cell_via_id(
+            is_row_id    = ls_row_id
+            is_column_id = ls_col_id
+            is_row_no    = ls_row_no
+          ).
+          READ TABLE lt_prps INTO DATA(ls_prps)
+             WITH KEY posid = lt_return[ 1 ]-fieldval.
+
+          IF sy-subrc = 0.
+            MODIFY lt_final INDEX lv_row
+              FROM VALUE ty_gl( posid = lt_return[ 1 ]-fieldval
+                                 prctr = ls_prps-prctr )
+              TRANSPORTING posid prctr.
+          ELSE.
+            MODIFY lt_final INDEX lv_row
+              FROM VALUE ty_gl( posid = lt_return[ 1 ]-fieldval )
+              TRANSPORTING posid.
+          ENDIF.
+
+          go_grid->refresh_table_display( ).
+        ENDIF.
+
+      WHEN 'PRCTR'.
+        CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
+          EXPORTING
+            retfield        = 'PRCTR'
+            dynpprog        = sy-cprog
+            dynpnr          = sy-dynnr
+            dynprofield     = 'LT_FINAL-PRCTR'
+            value_org       = 'S'
+          TABLES
+            value_tab       = lt_prps
+            return_tab      = lt_return
+          EXCEPTIONS
+            parameter_error = 1
+            no_values_found = 2
+            OTHERS          = 3.
+
+        IF sy-subrc = 0 AND lt_return IS NOT INITIAL.
+          go_grid->set_current_cell_via_id(
+            is_row_id    = ls_row_id
+            is_column_id = ls_col_id
+            is_row_no    = ls_row_no
+          ).
+
+          MODIFY lt_final INDEX lv_row
+            FROM VALUE ty_gl( prctr = lt_return[ 1 ]-fieldval )
+            TRANSPORTING prctr.
+
+          go_grid->refresh_table_display( ).
+        ENDIF.
+    ENDCASE.
+
+
+  ENDMETHOD.
+ENDCLASS.
+
+START-OF-SELECTION.
+  DATA(lo_obj) = NEW cl_gl( ).
+  lo_obj->get_data( ).
+  lo_obj->display_data( ).
+*&---------------------------------------------------------------------*
+*& Module STATUS_0100 OUTPUT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+MODULE status_0100 OUTPUT.
+  SET PF-STATUS 'PF_STATUS'.
+  SET TITLEBAR 'TITLE'.
+
+  IF go_container IS NOT BOUND.
+    go_container = NEW cl_gui_custom_container( container_name = 'LO_CONT' ).
+    go_grid = NEW cl_gui_alv_grid( i_parent  = go_container ).
+
+    lo_obj->fieldcat( ).
+    go_grid->set_table_for_first_display(
+       EXPORTING
+         is_layout = gs_layout
+       CHANGING
+         it_outtab = lt_final
+         it_fieldcatalog = gt_fieldcat
+    ).
+    lo_obj->register_f4( ).
+  ENDIF.
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*&      Module  USER_COMMAND_0100  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE user_command_0100 INPUT.
+  g_okcode = sy-ucomm.
+  CLEAR sy-ucomm.
+
+  CASE g_okcode.
+    WHEN 'SAVE'.
+      lo_obj->save_data( ).
+    WHEN 'BACK' OR 'CANCLE' OR 'EXIT'.
+      LEAVE TO SCREEN 0.
+  ENDCASE.
+ENDMODULE.
