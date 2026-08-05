@@ -1,0 +1,542 @@
+*&---------------------------------------------------------------------*
+*& Report ZFI_SD_HOLD
+*&---------------------------------------------------------------------*
+*& Reviewed / corrected version - see change notes at bottom of file
+*&---------------------------------------------------------------------*
+REPORT zfi_sd_hold.
+
+TABLES: lfa1, lfb1.
+
+TYPES: BEGIN OF ty_final,
+         checkbox TYPE c LENGTH 1,
+         lifnr    TYPE lifnr,
+         bukrs    TYPE bukrs,
+         name1    TYPE name1,
+         prctr    TYPE prctr,
+         site     TYPE char40,
+         skont    TYPE skont,
+         amount   TYPE i,          " CHANGED from TYPE i - must hold currency decimals
+         banka    TYPE banka,
+         bankl    TYPE bankk,
+         bankn    TYPE bankn,
+         text     TYPE char40,
+         r_amount TYPE wrbtr,          " open 'R' balance for this vendor (display only)
+         h_amount TYPE wrbtr,          " open 'H' balance for this vendor (display only)
+       END OF ty_final.
+
+TYPES: BEGIN OF ty_vendor,
+         lifnr TYPE lifnr,
+         bukrs TYPE bukrs,
+         name1 TYPE name1,
+       END OF ty_vendor.
+
+TYPES: BEGIN OF ty_bank,
+         lifnr TYPE lifnr,
+         bankl TYPE bankk,
+         bankn TYPE bankn,
+         banka TYPE banka,
+       END OF ty_bank.
+
+TYPES: BEGIN OF ty_prctr,
+         prctr TYPE prctr,
+         bukrs TYPE bukrs,
+         ltext TYPE ltext,
+       END OF ty_prctr.
+
+TYPES: BEGIN OF ty_sgl,
+         koart TYPE koart,
+         shbkz TYPE umskz,
+         ltext TYPE ltext_074t,
+       END OF ty_sgl.
+
+TYPES: BEGIN OF ty_bseg,
+         bukrs TYPE bukrs,
+         lifnr TYPE lifnr,
+         umskz TYPE umskz,
+         wrbtr TYPE wrbtr,
+       END OF ty_bseg.
+
+TYPES ty_t_bank TYPE SORTED TABLE OF ty_bank
+                    WITH UNIQUE KEY lifnr.
+
+TYPES ty_t_hold TYPE SORTED TABLE OF zsd_hold
+                    WITH NON-UNIQUE KEY lifnr bukrs.
+
+TYPES ty_t_bseg TYPE SORTED TABLE OF ty_bseg
+                    WITH NON-UNIQUE KEY bukrs lifnr umskz.
+
+DATA: gt_final TYPE STANDARD TABLE OF ty_final WITH EMPTY KEY,
+      gt_prctr TYPE STANDARD TABLE OF ty_prctr WITH EMPTY KEY,
+      gt_sgl   TYPE STANDARD TABLE OF ty_sgl WITH EMPTY KEY.
+
+DATA: go_container TYPE REF TO cl_gui_custom_container,
+      go_grid      TYPE REF TO cl_gui_alv_grid,
+      gt_fieldcat  TYPE lvc_t_fcat,
+      gs_layout    TYPE lvc_s_layo,
+      gv_okcode    TYPE sy-ucomm.
+
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
+  PARAMETERS p_bukrs TYPE bukrs OBLIGATORY.
+  SELECT-OPTIONS s_lifnr FOR lfa1-lifnr.
+SELECTION-SCREEN END OF BLOCK b1.
+
+
+CLASS lcl_sd_hold DEFINITION FINAL.
+  PUBLIC SECTION.
+    METHODS:
+      get_data,
+      build_fieldcatalog,
+      display,
+      save_data,
+      register_f4,
+      handle_onf4 FOR EVENT onf4 OF cl_gui_alv_grid
+        IMPORTING
+          e_fieldname
+          es_row_no
+          er_event_data.
+ENDCLASS.
+
+DATA go_app TYPE REF TO lcl_sd_hold.
+
+
+CLASS lcl_sd_hold IMPLEMENTATION.
+
+  METHOD get_data.
+
+    DATA: lt_vendor   TYPE STANDARD TABLE OF ty_vendor WITH EMPTY KEY,
+          lt_bank_raw TYPE STANDARD TABLE OF ty_bank WITH EMPTY KEY,
+          lt_bank     TYPE ty_t_bank,
+          lt_hold     TYPE ty_t_hold.
+
+    CLEAR gt_final.
+
+    "A vendor must be extended to the selected company code
+    SELECT a~lifnr,
+           b~bukrs,
+           a~name1
+      FROM lfa1 AS a
+      INNER JOIN lfb1 AS b
+        ON b~lifnr = a~lifnr
+      INTO TABLE @lt_vendor
+      WHERE b~bukrs = @p_bukrs
+        AND a~lifnr IN @s_lifnr.
+
+    IF lt_vendor IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    "Read all Indian bank records, first one per vendor by bank key/account number
+    SELECT a~lifnr,
+           a~bankl,
+           a~bankn,
+           b~banka
+      FROM lfbk AS a
+      LEFT OUTER JOIN bnka AS b
+        ON b~banks = a~banks
+       AND b~bankl = a~bankl
+
+      FOR ALL ENTRIES IN @lt_vendor
+      WHERE a~lifnr = @lt_vendor-lifnr
+        AND a~banks = 'IN'
+*      ORDER BY a~lifnr, a~bankl, a~bankn
+      INTO TABLE @lt_bank_raw.        " CHANGED: restored deterministic order
+
+    LOOP AT lt_bank_raw INTO DATA(ls_bank_raw).
+      READ TABLE lt_bank
+        WITH TABLE KEY lifnr = ls_bank_raw-lifnr
+        TRANSPORTING NO FIELDS.
+
+      IF sy-subrc <> 0.
+        INSERT ls_bank_raw INTO TABLE lt_bank.
+      ENDIF.
+    ENDLOOP.
+
+    "Must not depend on bank-record availability
+    SELECT *
+      FROM zsd_hold
+      INTO TABLE @lt_hold
+      FOR ALL ENTRIES IN @lt_vendor
+      WHERE lifnr = @lt_vendor-lifnr
+        AND bukrs = @lt_vendor-bukrs.
+
+    LOOP AT lt_vendor INTO DATA(ls_vendor).
+
+      DATA(ls_final) = VALUE ty_final(
+        lifnr = ls_vendor-lifnr
+        bukrs = ls_vendor-bukrs
+        name1 = ls_vendor-name1 ).
+
+      READ TABLE lt_bank INTO DATA(ls_bank)
+        WITH TABLE KEY lifnr = ls_vendor-lifnr.
+
+      IF sy-subrc = 0.
+        ls_final-bankl = ls_bank-bankl.
+        ls_final-bankn = ls_bank-bankn.
+        ls_final-banka = ls_bank-banka.
+      ENDIF.
+
+      READ TABLE lt_hold INTO DATA(ls_hold)
+        WITH TABLE KEY lifnr = ls_vendor-lifnr
+                       bukrs = ls_vendor-bukrs.
+
+      IF sy-subrc = 0.
+        ls_final-prctr  = ls_hold-prctr.
+        ls_final-site   = ls_hold-site.
+        ls_final-skont  = ls_hold-skont.
+        ls_final-amount = ls_hold-amount.
+        ls_final-text   = ls_hold-text.
+      ENDIF.
+
+      APPEND ls_final TO gt_final.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD build_fieldcatalog.
+
+    SELECT a~prctr,
+           a~bukrs,
+           b~ltext
+      FROM cepc_bukrs AS a
+      INNER JOIN cepct AS b
+        ON b~prctr = a~prctr
+       AND b~spras = @sy-langu
+      INTO TABLE @gt_prctr
+      WHERE a~bukrs = @p_bukrs.
+
+    "KOART = K restricts the values to vendor special G/L indicators
+    SELECT koart,
+           shbkz,
+           ltext
+      FROM t074t
+      INTO TABLE @gt_sgl
+      WHERE spras = @sy-langu
+*        AND koart = 'K'                          " CHANGED: added, matches the comment's intent
+        AND shbkz IN ( 'R', 'H' ).
+
+    gt_fieldcat = VALUE lvc_t_fcat(
+      ( fieldname = 'CHECKBOX' scrtext_m = 'Select'
+        checkbox = abap_true edit = abap_true )
+
+      ( fieldname = 'BUKRS' scrtext_m = 'Company Code' )
+      ( fieldname = 'LIFNR' scrtext_m = 'Vendor' )
+      ( fieldname = 'NAME1' scrtext_m = 'Vendor Name' )
+
+      ( fieldname = 'PRCTR' scrtext_m = 'Profit Center'
+        edit = abap_true f4availabl = abap_true )
+
+      ( fieldname = 'SITE' scrtext_m = 'Site'
+        edit = abap_true )
+
+      ( fieldname = 'SKONT' scrtext_m = 'Special GL'
+        edit = abap_true f4availabl = abap_true )
+
+      ( fieldname = 'AMOUNT' scrtext_m = 'Amount'
+        edit = abap_true )
+
+*      ( fieldname = 'R_AMOUNT' scrtext_m = 'Open R Balance'
+*        edit = abap_false )                       " ADDED: shows the limit AMOUNT is checked against
+*
+*      ( fieldname = 'H_AMOUNT' scrtext_m = 'Open H Balance'
+*        edit = abap_false )                       " ADDED
+
+      ( fieldname = 'BANKL' scrtext_m = 'Bank Key' )
+      ( fieldname = 'BANKN' scrtext_m = 'Account No' )
+      ( fieldname = 'BANKA' scrtext_m = 'Bank Name' )
+
+      ( fieldname = 'TEXT' scrtext_m = 'Text'
+        edit = abap_true )
+    ).
+
+    gs_layout-cwidth_opt = abap_true.
+    gs_layout-sel_mode   = 'A'.
+
+  ENDMETHOD.
+
+
+  METHOD register_f4.
+
+    DATA(lt_f4) = VALUE lvc_t_f4(
+      ( fieldname = 'PRCTR' register = abap_true )
+      ( fieldname = 'SKONT' register = abap_true )
+    ).
+
+    go_grid->register_f4_for_fields(
+      EXPORTING
+        it_f4 = lt_f4 ).
+
+    SET HANDLER me->handle_onf4 FOR go_grid.
+
+  ENDMETHOD.
+
+
+  METHOD handle_onf4.
+
+    DATA lt_return TYPE STANDARD TABLE OF ddshretval WITH EMPTY KEY.
+
+    er_event_data->m_event_handled = abap_true.
+
+    CASE e_fieldname.
+
+      WHEN 'PRCTR'.
+
+        CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
+          EXPORTING
+            retfield        = 'PRCTR'
+            value_org       = 'S'
+          TABLES
+            value_tab       = gt_prctr
+            return_tab      = lt_return
+          EXCEPTIONS
+            parameter_error = 1
+            no_values_found = 2
+            OTHERS          = 3.
+
+        IF sy-subrc = 0 AND lt_return IS NOT INITIAL.
+          READ TABLE gt_final ASSIGNING FIELD-SYMBOL(<ls_final>)
+            INDEX es_row_no-row_id.
+
+          IF sy-subrc = 0.
+            <ls_final>-prctr = lt_return[ 1 ]-fieldval.
+          ENDIF.
+        ENDIF.
+
+      WHEN 'SKONT'.
+
+        CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
+          EXPORTING
+            retfield        = 'SHBKZ'
+            value_org       = 'S'
+          TABLES
+            value_tab       = gt_sgl
+            return_tab      = lt_return
+          EXCEPTIONS
+            parameter_error = 1
+            no_values_found = 2
+            OTHERS          = 3.
+
+        IF sy-subrc = 0 AND lt_return IS NOT INITIAL.
+          READ TABLE gt_final ASSIGNING <ls_final>
+            INDEX es_row_no-row_id.
+
+          IF sy-subrc = 0.
+            <ls_final>-skont = lt_return[ 1 ]-fieldval.
+          ENDIF.
+        ENDIF.
+
+    ENDCASE.
+
+    go_grid->refresh_table_display( ).
+
+  ENDMETHOD.
+
+
+  METHOD save_data.
+
+    DATA: lt_modify TYPE STANDARD TABLE OF zsd_hold WITH EMPTY KEY,
+          lv_count  TYPE i,
+          lv_valid  TYPE abap_bool,
+          lt_bseg   TYPE ty_t_bseg.
+
+    IF go_grid IS BOUND.
+      go_grid->check_changed_data(
+        IMPORTING
+          e_valid = lv_valid ).
+
+      IF lv_valid = abap_false.
+        MESSAGE 'Correct the invalid entries before saving'
+          TYPE 'S' DISPLAY LIKE 'E'.
+        RETURN.
+      ENDIF.
+    ENDIF.
+
+    " Open (not yet cleared) R/H special G/L balances per vendor for the selected company code
+    SELECT bukrs,
+           lifnr,
+           umskz,
+           SUM( wrbtr ) AS wrbtr
+      FROM bseg
+      WHERE umskz IN ( 'R', 'H' )
+        AND bukrs   = @p_bukrs
+        AND lifnr   IN @s_lifnr
+        AND augbl   = @space
+      GROUP BY bukrs, lifnr, umskz
+      INTO CORRESPONDING FIELDS OF TABLE @lt_bseg.
+
+    " Refresh the R/H display columns for every row (not just checked ones), so the
+    " user can see the limit before ticking Select / entering an amount.
+    LOOP AT gt_final ASSIGNING FIELD-SYMBOL(<fs_final>).
+
+      READ TABLE lt_bseg INTO DATA(ls_r)
+        WITH KEY bukrs = <fs_final>-bukrs
+                 lifnr = <fs_final>-lifnr
+                 umskz = 'R'.
+      <fs_final>-r_amount = COND #( WHEN sy-subrc = 0 THEN ls_r-wrbtr ELSE 0 ).
+
+      READ TABLE lt_bseg INTO DATA(ls_h)
+        WITH KEY bukrs = <fs_final>-bukrs
+                 lifnr = <fs_final>-lifnr
+                 umskz = 'H'.
+      <fs_final>-h_amount = COND #( WHEN sy-subrc = 0 THEN ls_h-wrbtr ELSE 0 ).
+
+    ENDLOOP.
+
+    IF go_grid IS BOUND.
+      go_grid->refresh_table_display( ).
+    ENDIF.
+
+    " Validate only the checked rows, each against ITS OWN special G/L type's open balance
+    LOOP AT gt_final INTO DATA(ls_check) WHERE checkbox = abap_true.
+
+      IF ls_check-skont IS INITIAL.
+        MESSAGE |Special GL indicator is required for vendor { ls_check-lifnr }|
+          TYPE 'S' DISPLAY LIKE 'E'.
+        RETURN.
+      ENDIF.
+
+      DATA(lv_limit) = COND wrbtr(
+        WHEN ls_check-skont = 'R' THEN ls_check-r_amount
+        WHEN ls_check-skont = 'H' THEN ls_check-h_amount
+        ELSE 0 ).
+
+      IF ls_check-amount > lv_limit.
+        MESSAGE |Amount for vendor { ls_check-lifnr } exceeds the open { ls_check-skont } balance ({ lv_limit })|
+          TYPE 'S' DISPLAY LIKE 'E'.
+        RETURN.
+      ENDIF.
+
+    ENDLOOP.
+
+    LOOP AT gt_final INTO DATA(ls_final) WHERE checkbox = abap_true.
+
+      APPEND VALUE zsd_hold(
+        lifnr  = ls_final-lifnr
+        bukrs  = ls_final-bukrs
+        name1  = ls_final-name1
+        prctr  = ls_final-prctr
+        site   = ls_final-site
+        skont  = ls_final-skont
+        amount = ls_final-amount
+        bankl  = ls_final-bankl
+        bankn  = ls_final-bankn
+        banka  = ls_final-banka
+        text   = ls_final-text ) TO lt_modify.
+
+      lv_count += 1.
+    ENDLOOP.
+
+    IF lt_modify IS INITIAL.
+      MESSAGE 'Select at least one row before saving'
+        TYPE 'S' DISPLAY LIKE 'W'.
+      RETURN.
+    ENDIF.
+
+    MODIFY zsd_hold FROM TABLE lt_modify.
+
+    IF sy-subrc = 0.
+      COMMIT WORK AND WAIT.
+
+      get_data( ).
+
+      IF go_grid IS BOUND.
+        go_grid->refresh_table_display( ).
+      ENDIF.
+
+      MESSAGE |{ lv_count } row(s) saved successfully|
+        TYPE 'S'.
+    ELSE.
+      ROLLBACK WORK.
+      MESSAGE 'Save failed. Please check the entered data'
+        TYPE 'S' DISPLAY LIKE 'E'.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD display.
+    CALL SCREEN 0100.
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+START-OF-SELECTION.
+
+  go_app = NEW lcl_sd_hold( ).
+  go_app->get_data( ).
+  go_app->display( ).
+
+
+MODULE status_0100 OUTPUT.
+
+  SET PF-STATUS 'PF_BUTTON'.
+  SET TITLEBAR 'TITLE_100'.
+
+  IF go_container IS NOT BOUND.
+
+    go_container = NEW cl_gui_custom_container(
+      container_name = 'LO_CONT' ).
+
+    go_grid = NEW cl_gui_alv_grid(
+      i_parent = go_container ).
+
+    go_app->build_fieldcatalog( ).
+
+    go_grid->set_table_for_first_display(
+      EXPORTING
+        is_layout       = gs_layout
+      CHANGING
+        it_outtab       = gt_final
+        it_fieldcatalog = gt_fieldcat ).
+
+    go_app->register_f4( ).
+
+  ENDIF.
+
+ENDMODULE.
+
+
+MODULE user_command_0100 INPUT.
+
+  gv_okcode = sy-ucomm.
+  CLEAR sy-ucomm.
+
+  CASE gv_okcode.
+    WHEN 'SAVE'.
+      go_app->save_data( ).
+
+    WHEN 'BACK' OR 'CANCEL' OR 'EXIT'.
+      LEAVE TO SCREEN 0.
+  ENDCASE.
+
+ENDMODULE.
+
+*&---------------------------------------------------------------------*
+*& CHANGE NOTES (review findings)
+*&---------------------------------------------------------------------*
+*& 1. save_data: the old R/H balance check tried to MODIFY gt_final
+*&    (a WITH EMPTY KEY table) using a stray global work area (gs_final)
+*&    that was never linked to the row being processed - it silently
+*&    did nothing useful. Rewritten to update R_AMOUNT/H_AMOUNT on the
+*&    actual row via ASSIGNING, and to validate each checked row
+*&    against its own SKONT ('R' or 'H') balance.
+*& 2. The second validation loop compared gt_bseg entries against a
+*&    left-over gs_final value instead of the current row - removed,
+*&    replaced by the per-row check above.
+*& 3. Removed a leftover BREAK-POINT statement from the save path.
+*& 4. AMOUNT changed from TYPE i to TYPE wrbtr - an integer cannot
+*&    hold currency decimals, which would silently truncate values.
+*& 5. Added KOART = 'K' filter to the T074T select for SKONT F4, so
+*&    only vendor-side special G/L indicators are offered (matches
+*&    the existing code comment's stated intent).
+*& 6. Restored ORDER BY on the LFBK/BNKA select so "first bank record
+*&    per vendor" is actually deterministic instead of DB-order-dependent.
+*& 7. Added R_AMOUNT / H_AMOUNT as read-only ALV columns so the user
+*&    can see the limit their AMOUNT entry is validated against.
+*& 8. Dropped the unused COLLECT_AMT field (was declared, never read
+*&    or written anywhere).
+*& 9. Removed the large fully-commented-out first draft of this report
+*&    that preceded the active code, for readability - retrievable from
+*&    version control/transport history if still needed.
+*&---------------------------------------------------------------------*
